@@ -1,0 +1,27 @@
+{
+  "name": "SmartTileShared",
+  "version": "1.0.0",
+  "description": "Shared library for Smart Tile Lighting System",
+  "keywords": ["esp32", "esp-now", "iot", "lighting"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-repo/smart-tile-system"
+  },
+  "authors": [
+    {
+      "name": "Yahya Ali"
+    }
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "bblanchon/ArduinoJson": "^6.21.3"
+  },
+  "frameworks": "arduino",
+  "platforms": ["espressif32"],
+  "build": {
+    "flags": [
+      "-I include"
+    ]
+  }
+}
+

@@ -1,0 +1,51 @@
+@startuml Presence Detection
+title Smart Tile System - Presence Detection Sequence
+
+participant "mmWave Sensor" as mmwave
+participant "Coordinator" as coord
+participant "Zone Control" as zones
+participant "Node Registry" as registry
+participant "Thermal Control" as thermal
+participant "ESP-NOW" as espnow
+participant "Node" as node
+participant "MQTT" as mqtt
+
+== Presence Detection Flow ==
+mmwave -> coord: Presence detected
+activate coord
+
+coord -> zones: getLightsForZone(zoneId)
+activate zones
+zones --> coord: affectedLights[]
+deactivate zones
+
+loop for each light
+    coord -> registry: getNodeForLight(lightId)
+    activate registry
+    registry --> coord: nodeId
+    deactivate registry
+    
+    coord -> thermal: getNodeDerationLevel(nodeId)
+    activate thermal
+    thermal --> coord: maxBrightness
+    deactivate thermal
+    
+    coord -> espnow: sendLightCommand(nodeId, brightness)
+    activate espnow
+    espnow -> node: SET_LIGHT command
+    activate node
+    node -> node: Apply brightness
+    node --> espnow: ACK
+    deactivate node
+    espnow --> coord: Success
+    deactivate espnow
+    
+    coord -> mqtt: publishLightState(lightId, brightness)
+    activate mqtt
+    mqtt --> coord: Success
+    deactivate mqtt
+end
+
+deactivate coord
+
+@enduml

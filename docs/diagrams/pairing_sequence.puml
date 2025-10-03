@@ -1,0 +1,39 @@
+@startuml Pairing Sequence
+title Smart Tile System - Node Pairing Sequence
+
+participant "Node" as node
+participant "Coordinator" as coord
+participant "Node Registry" as registry
+participant "ESP-NOW" as espnow
+
+== Pairing Initialization ==
+[-> coord: Press pairing button
+activate coord
+coord -> registry: startPairing()
+activate registry
+registry --> coord: Pairing window open
+coord -> espnow: enablePairingMode()
+activate espnow
+
+[-> node: Press pairing button
+activate node
+node -> node: Generate pairing token
+node -> espnow: broadcastJoinRequest()
+
+espnow -> coord: onJoinRequest()
+coord -> registry: processPairingRequest(mac, nodeId)
+registry -> registry: registerNode(nodeId, lightId)
+registry --> coord: Success
+coord -> espnow: sendJoinAccept(nodeId, lmk)
+espnow -> node: onJoinAccept(config)
+
+node -> node: Store credentials
+node --> node: Enter OPERATIONAL state
+deactivate node
+
+registry -> registry: Save node mapping
+deactivate registry
+deactivate espnow
+deactivate coord
+
+@enduml
