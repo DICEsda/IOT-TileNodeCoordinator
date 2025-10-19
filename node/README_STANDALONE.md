@@ -8,8 +8,8 @@ This firmware lets you test the node without a coordinator. It drives an SK6812B
 - Build flags: `-DSTANDALONE_TEST` (already enabled in `platformio.ini`)
 
 ## Wiring
-- LED strip data: `Pins::LED_DATA` (GPIO2)
-- Button (active low): `Pins::BUTTON` (GPIO9) with internal pull-up
+- LED strip data: `Pins::LED_DATA` (GPIO1)
+- Button (active low): `Pins::BUTTON` (GPIO4) with internal pull-up
 - Power as per your board specs
 
 ## Controls

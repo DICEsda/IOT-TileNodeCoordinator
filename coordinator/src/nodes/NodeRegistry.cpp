@@ -60,6 +60,10 @@ bool NodeRegistry::registerNode(const String& nodeId, const String& lightId) {
     
     saveToStorage();
     Logger::info("Registered node %s with light %s", nodeId.c_str(), lightId.c_str());
+    // Notify any listener about registration
+    if (nodeRegisteredCallback) {
+        nodeRegisteredCallback(nodeId, lightId);
+    }
     return true;
 }
 
@@ -82,6 +86,15 @@ void NodeRegistry::startPairing(uint32_t durationMs) {
     pairingActive = true;
     pairingEndTime = millis() + durationMs;
     Logger::info("Started pairing window for %d ms", durationMs);
+}
+
+void NodeRegistry::stopPairing() {
+    pairingActive = false;
+    Logger::info("Pairing window closed manually");
+}
+
+void NodeRegistry::setNodeRegisteredCallback(std::function<void(const String& nodeId, const String& lightId)> callback) {
+    nodeRegisteredCallback = callback;
 }
 
 bool NodeRegistry::isPairingActive() const {

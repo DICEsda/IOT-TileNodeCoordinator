@@ -1,260 +1,231 @@
 #include "EspNowMessage.h"
 
-// JoinRequestMessage implementation
+// --- JoinRequest ---
 JoinRequestMessage::JoinRequestMessage() {
-    type = MessageType::JOIN_REQUEST;
-    msg = "join_request";
-    timestamp = millis();
+	type = MessageType::JOIN_REQUEST;
+	msg = "join_request";
+	ts = millis();
 }
 
 String JoinRequestMessage::toJson() const {
-    DynamicJsonDocument doc(512);
-    doc["msg"] = msg;
-    doc["mac"] = mac;
-    doc["caps"]["pwm"] = caps.pwm;
-    doc["caps"]["temp_spi"] = caps.temp_spi;
-    doc["fw"] = fw;
-    doc["token"] = token;
-    
-    String result;
-    serializeJson(doc, result);
-    return result;
+	DynamicJsonDocument doc(512);
+	doc["msg"] = msg;
+	doc["mac"] = mac;
+	doc["fw"] = fw;
+	doc["caps"]["rgbw"] = caps.rgbw;
+	doc["caps"]["led_count"] = caps.led_count;
+	doc["caps"]["temp_spi"] = caps.temp_spi;
+	doc["caps"]["deep_sleep"] = caps.deep_sleep;
+	doc["token"] = token;
+	String out; serializeJson(doc, out); return out;
 }
 
 bool JoinRequestMessage::fromJson(const String& json) {
-    DynamicJsonDocument doc(512);
-    DeserializationError error = deserializeJson(doc, json);
-    
-    if (error) return false;
-    
-    msg = doc["msg"].as<String>();
-    mac = doc["mac"].as<String>();
-    caps.pwm = doc["caps"]["pwm"].as<bool>();
-    caps.temp_spi = doc["caps"]["temp_spi"].as<bool>();
-    fw = doc["fw"].as<String>();
-    token = doc["token"].as<String>();
-    
-    return true;
+	DynamicJsonDocument doc(512);
+	DeserializationError err = deserializeJson(doc, json);
+	if (err) return false;
+	msg = doc["msg"].as<String>();
+	mac = doc["mac"].as<String>();
+	fw = doc["fw"].as<String>();
+	caps.rgbw = doc["caps"]["rgbw"].as<bool>();
+	caps.led_count = doc["caps"]["led_count"].as<uint8_t>();
+	caps.temp_spi = doc["caps"]["temp_spi"].as<bool>();
+	caps.deep_sleep = doc["caps"]["deep_sleep"].as<bool>();
+	token = doc["token"].as<String>();
+	return true;
 }
 
-// JoinAcceptMessage implementation
+// --- JoinAccept ---
 JoinAcceptMessage::JoinAcceptMessage() {
-    type = MessageType::JOIN_ACCEPT;
-    msg = "join_accept";
-    timestamp = millis();
+	type = MessageType::JOIN_ACCEPT;
+	msg = "join_accept";
+	ts = millis();
 }
 
 String JoinAcceptMessage::toJson() const {
-    DynamicJsonDocument doc(512);
-    doc["msg"] = msg;
-    doc["node_id"] = node_id;
-    doc["lmk"] = lmk;
-    doc["light_id"] = light_id;
-    doc["cfg"]["pwm_freq"] = cfg.pwm_freq;
-    doc["cfg"]["rx_window_ms"] = cfg.rx_window_ms;
-    doc["cfg"]["rx_period_ms"] = cfg.rx_period_ms;
-    
-    String result;
-    serializeJson(doc, result);
-    return result;
+	DynamicJsonDocument doc(256);
+	doc["msg"] = msg;
+	doc["node_id"] = node_id;
+	doc["light_id"] = light_id;
+	doc["lmk"] = lmk;
+	doc["cfg"]["pwm_freq"] = cfg.pwm_freq;
+	doc["cfg"]["rx_window_ms"] = cfg.rx_window_ms;
+	doc["cfg"]["rx_period_ms"] = cfg.rx_period_ms;
+	String out; serializeJson(doc, out); return out;
 }
 
 bool JoinAcceptMessage::fromJson(const String& json) {
-    DynamicJsonDocument doc(512);
-    DeserializationError error = deserializeJson(doc, json);
-    
-    if (error) return false;
-    
-    msg = doc["msg"].as<String>();
-    node_id = doc["node_id"].as<String>();
-    lmk = doc["lmk"].as<String>();
-    light_id = doc["light_id"].as<String>();
-    cfg.pwm_freq = doc["cfg"]["pwm_freq"].as<int>();
-    cfg.rx_window_ms = doc["cfg"]["rx_window_ms"].as<int>();
-    cfg.rx_period_ms = doc["cfg"]["rx_period_ms"].as<int>();
-    
-    return true;
+	DynamicJsonDocument doc(256);
+	DeserializationError err = deserializeJson(doc, json);
+	if (err) return false;
+	msg = doc["msg"].as<String>();
+	node_id = doc["node_id"].as<String>();
+	light_id = doc["light_id"].as<String>();
+	lmk = doc["lmk"].as<String>();
+	cfg.pwm_freq = doc["cfg"]["pwm_freq"].as<int>();
+	cfg.rx_window_ms = doc["cfg"]["rx_window_ms"].as<int>();
+	cfg.rx_period_ms = doc["cfg"]["rx_period_ms"].as<int>();
+	return true;
 }
 
-// SetLightMessage implementation
+// --- SetLight ---
 SetLightMessage::SetLightMessage() {
-    type = MessageType::SET_LIGHT;
-    msg = "set_light";
-    timestamp = millis();
+	type = MessageType::SET_LIGHT;
+	msg = "set_light";
+	ts = millis();
 }
 
 String SetLightMessage::toJson() const {
-    DynamicJsonDocument doc(512);
-    doc["msg"] = msg;
-    doc["cmd_id"] = cmd_id;
-    doc["light_id"] = light_id;
-    doc["value"] = value;
-    doc["fade_ms"] = fade_ms;
-    doc["reason"] = reason;
-    doc["ttl_ms"] = ttl_ms;
-    
-    String result;
-    serializeJson(doc, result);
-    return result;
+	DynamicJsonDocument doc(256);
+	doc["msg"] = msg;
+	doc["cmd_id"] = cmd_id;
+	doc["light_id"] = light_id;
+	doc["r"] = r; doc["g"] = g; doc["b"] = b; doc["w"] = w;
+	doc["value"] = value;
+	doc["fade_ms"] = fade_ms;
+	doc["override_status"] = override_status;
+	doc["ttl_ms"] = ttl_ms;
+	if (reason.length()) doc["reason"] = reason;
+	String out; serializeJson(doc, out); return out;
 }
 
 bool SetLightMessage::fromJson(const String& json) {
-    DynamicJsonDocument doc(512);
-    DeserializationError error = deserializeJson(doc, json);
-    
-    if (error) return false;
-    
-    msg = doc["msg"].as<String>();
-    cmd_id = doc["cmd_id"].as<String>();
-    light_id = doc["light_id"].as<String>();
-    value = doc["value"].as<uint8_t>();
-    fade_ms = doc["fade_ms"].as<uint16_t>();
-    reason = doc["reason"].as<String>();
-    ttl_ms = doc["ttl_ms"].as<uint16_t>();
-    
-    return true;
+	DynamicJsonDocument doc(256);
+	DeserializationError err = deserializeJson(doc, json);
+	if (err) return false;
+	msg = doc["msg"].as<String>();
+	cmd_id = doc["cmd_id"].as<String>();
+	light_id = doc["light_id"].as<String>();
+	r = (uint8_t)(doc["r"].as<uint8_t>() || 0);
+	g = (uint8_t)(doc["g"].as<uint8_t>() || 0);
+	b = (uint8_t)(doc["b"].as<uint8_t>() || 0);
+	w = (uint8_t)(doc["w"].as<uint8_t>() || 0);
+	value = (uint8_t)(doc["value"].as<uint8_t>() || 0);
+	fade_ms = (uint16_t)(doc["fade_ms"].as<uint16_t>() | 0);
+	override_status = doc["override_status"].as<bool>();
+	ttl_ms = (uint16_t)(doc["ttl_ms"].as<uint16_t>() | 1500);
+	reason = doc["reason"].as<String>();
+	return true;
 }
 
-// NodeStatusMessage implementation
+// --- NodeStatus ---
 NodeStatusMessage::NodeStatusMessage() {
-    type = MessageType::NODE_STATUS;
-    msg = "node_status";
-    timestamp = millis();
+	type = MessageType::NODE_STATUS;
+	msg = "node_status";
+	ts = millis();
 }
 
 String NodeStatusMessage::toJson() const {
-    DynamicJsonDocument doc(512);
-    doc["msg"] = msg;
-    doc["node_id"] = node_id;
-    doc["light_id"] = light_id;
-    doc["temp_c"] = temp_c;
-    doc["duty"] = duty;
-    doc["fw"] = fw;
-    doc["vbat_mv"] = vbat_mv;
-    doc["ts"] = timestamp;
-    
-    String result;
-    serializeJson(doc, result);
-    return result;
+	DynamicJsonDocument doc(256);
+	doc["msg"] = msg;
+	doc["node_id"] = node_id;
+	doc["light_id"] = light_id;
+	doc["avg_r"] = avg_r;
+	doc["avg_g"] = avg_g;
+	doc["avg_b"] = avg_b;
+	doc["avg_w"] = avg_w;
+	doc["status_mode"] = status_mode;
+	doc["vbat_mv"] = vbat_mv;
+	doc["fw"] = fw;
+	doc["ts"] = ts;
+	String out; serializeJson(doc, out); return out;
 }
 
 bool NodeStatusMessage::fromJson(const String& json) {
-    DynamicJsonDocument doc(512);
-    DeserializationError error = deserializeJson(doc, json);
-    
-    if (error) return false;
-    
-    msg = doc["msg"].as<String>();
-    node_id = doc["node_id"].as<String>();
-    light_id = doc["light_id"].as<String>();
-    temp_c = doc["temp_c"].as<float>();
-    duty = doc["duty"].as<uint8_t>();
-    fw = doc["fw"].as<String>();
-    vbat_mv = doc["vbat_mv"].as<uint16_t>();
-    timestamp = doc["ts"].as<uint32_t>();
-    
-    return true;
+	DynamicJsonDocument doc(256);
+	DeserializationError err = deserializeJson(doc, json);
+	if (err) return false;
+	msg = doc["msg"].as<String>();
+	node_id = doc["node_id"].as<String>();
+	light_id = doc["light_id"].as<String>();
+	avg_r = (uint8_t)(doc["avg_r"].as<uint8_t>() | 0);
+	avg_g = (uint8_t)(doc["avg_g"].as<uint8_t>() | 0);
+	avg_b = (uint8_t)(doc["avg_b"].as<uint8_t>() | 0);
+	avg_w = (uint8_t)(doc["avg_w"].as<uint8_t>() | 0);
+	status_mode = doc["status_mode"].as<String>();
+	vbat_mv = (uint16_t)(doc["vbat_mv"].as<uint16_t>() | 0);
+	fw = doc["fw"].as<String>();
+	ts = doc["ts"].as<uint32_t>() | millis();
+	return true;
 }
 
-// ErrorMessage implementation
+// --- Error ---
 ErrorMessage::ErrorMessage() {
-    type = MessageType::ERROR;
-    msg = "error";
-    timestamp = millis();
+	type = MessageType::ERROR;
+	msg = "error";
+	ts = millis();
 }
 
 String ErrorMessage::toJson() const {
-    DynamicJsonDocument doc(256);
-    doc["msg"] = msg;
-    doc["node_id"] = node_id;
-    doc["code"] = code;
-    doc["info"] = info;
-    
-    String result;
-    serializeJson(doc, result);
-    return result;
+	DynamicJsonDocument doc(192);
+	doc["msg"] = msg;
+	doc["node_id"] = node_id;
+	doc["code"] = code;
+	doc["info"] = info;
+	String out; serializeJson(doc, out); return out;
 }
 
 bool ErrorMessage::fromJson(const String& json) {
-    DynamicJsonDocument doc(256);
-    DeserializationError error = deserializeJson(doc, json);
-    
-    if (error) return false;
-    
-    msg = doc["msg"].as<String>();
-    node_id = doc["node_id"].as<String>();
-    code = doc["code"].as<String>();
-    info = doc["info"].as<String>();
-    
-    return true;
+	DynamicJsonDocument doc(192);
+	DeserializationError err = deserializeJson(doc, json);
+	if (err) return false;
+	msg = doc["msg"].as<String>();
+	node_id = doc["node_id"].as<String>();
+	code = doc["code"].as<String>();
+	info = doc["info"].as<String>();
+	return true;
 }
 
-// AckMessage implementation
+// --- Ack ---
 AckMessage::AckMessage() {
-    type = MessageType::ACK;
-    msg = "ack";
-    timestamp = millis();
+	type = MessageType::ACK;
+	msg = "ack";
+	ts = millis();
 }
 
 String AckMessage::toJson() const {
-    DynamicJsonDocument doc(128);
-    doc["msg"] = msg;
-    doc["cmd_id"] = cmd_id;
-    
-    String result;
-    serializeJson(doc, result);
-    return result;
+	DynamicJsonDocument doc(96);
+	doc["msg"] = msg;
+	doc["cmd_id"] = cmd_id;
+	String out; serializeJson(doc, out); return out;
 }
 
 bool AckMessage::fromJson(const String& json) {
-    DynamicJsonDocument doc(128);
-    DeserializationError error = deserializeJson(doc, json);
-    
-    if (error) return false;
-    
-    msg = doc["msg"].as<String>();
-    cmd_id = doc["cmd_id"].as<String>();
-    
-    return true;
+	DynamicJsonDocument doc(96);
+	DeserializationError err = deserializeJson(doc, json);
+	if (err) return false;
+	msg = doc["msg"].as<String>();
+	cmd_id = doc["cmd_id"].as<String>();
+	return true;
 }
 
-// MessageFactory implementation
+// --- Factory ---
 EspNowMessage* MessageFactory::createMessage(const String& json) {
-    MessageType type = getMessageType(json);
-    
-    switch (type) {
-        case MessageType::JOIN_REQUEST:
-            return new JoinRequestMessage();
-        case MessageType::JOIN_ACCEPT:
-            return new JoinAcceptMessage();
-        case MessageType::SET_LIGHT:
-            return new SetLightMessage();
-        case MessageType::NODE_STATUS:
-            return new NodeStatusMessage();
-        case MessageType::ERROR:
-            return new ErrorMessage();
-        case MessageType::ACK:
-            return new AckMessage();
-        default:
-            return nullptr;
-    }
+	MessageType t = getMessageType(json);
+	EspNowMessage* m = nullptr;
+	switch (t) {
+		case MessageType::JOIN_REQUEST: m = new JoinRequestMessage(); break;
+		case MessageType::JOIN_ACCEPT:  m = new JoinAcceptMessage(); break;
+		case MessageType::SET_LIGHT:    m = new SetLightMessage(); break;
+		case MessageType::NODE_STATUS:  m = new NodeStatusMessage(); break;
+		case MessageType::ERROR:        m = new ErrorMessage(); break;
+		case MessageType::ACK:          m = new AckMessage(); break;
+		default: return nullptr;
+	}
+	if (m && !m->fromJson(json)) { delete m; return nullptr; }
+	return m;
 }
 
 MessageType MessageFactory::getMessageType(const String& json) {
-    DynamicJsonDocument doc(128);
-    DeserializationError error = deserializeJson(doc, json);
-    
-    if (error) return MessageType::ERROR;
-    
-    String msg = doc["msg"].as<String>();
-    
-    if (msg == "join_request") return MessageType::JOIN_REQUEST;
-    if (msg == "join_accept") return MessageType::JOIN_ACCEPT;
-    if (msg == "set_light") return MessageType::SET_LIGHT;
-    if (msg == "node_status") return MessageType::NODE_STATUS;
-    if (msg == "error") return MessageType::ERROR;
-    if (msg == "ack") return MessageType::ACK;
-    
-    return MessageType::ERROR;
+	DynamicJsonDocument doc(96);
+	DeserializationError err = deserializeJson(doc, json);
+	if (err) return MessageType::ERROR;
+	String m = doc["msg"].as<String>();
+	if (m == "join_request") return MessageType::JOIN_REQUEST;
+	if (m == "join_accept") return MessageType::JOIN_ACCEPT;
+	if (m == "set_light") return MessageType::SET_LIGHT;
+	if (m == "node_status") return MessageType::NODE_STATUS;
+	if (m == "ack") return MessageType::ACK;
+	return MessageType::ERROR;
 }
 

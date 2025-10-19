@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <map>
+#include <functional>
 #include "../Models.h"
 
 struct NodeThermalData {
@@ -32,13 +33,13 @@ public:
     void setGlobalThermalLimits(float derateStartTemp, float derateMaxTemp);
     
     // Alert handling
-    void registerThermalAlertCallback(void (*callback)(const String&, const NodeThermalData&));
+    void registerThermalAlertCallback(std::function<void(const String&, const NodeThermalData&)> callback);
 
 private:
     std::map<String, NodeThermalData> nodeTemperatures;
     float globalDerateStartTemp;
     float globalDerateMaxTemp;
-    void (*thermalAlertCallback)(const String&, const NodeThermalData&);
+    std::function<void(const String&, const NodeThermalData&)> thermalAlertCallback;
 
     void checkThermalAlert(const String& nodeId, const NodeThermalData& data);
     uint8_t calculateDerationLevel(float temp, float startTemp, float maxTemp);

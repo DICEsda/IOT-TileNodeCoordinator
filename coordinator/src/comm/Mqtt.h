@@ -5,6 +5,8 @@
 #include <WiFi.h>
 #include <map>
 #include "../Models.h"
+// Include ThermalControl.h for NodeThermalData
+#include "../sensors/ThermalControl.h" // for NodeThermalData
 
 class Mqtt {
 public:

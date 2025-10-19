@@ -8,6 +8,7 @@
 #include "../zones/ZoneControl.h"
 #include "../input/ButtonControl.h"
 #include "../sensors/ThermalControl.h"
+#include "../utils/StatusLed.h"
 
 class Coordinator {
 public:
@@ -25,6 +26,8 @@ private:
     ZoneControl* zones;
     ButtonControl* buttons;
     ThermalControl* thermal;
+    // Onboard status LED helper
+    StatusLed statusLed;
     
     // Event handlers
     void onMmWaveEvent(const MmWaveEvent& event);

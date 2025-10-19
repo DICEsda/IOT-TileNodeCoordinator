@@ -1,0 +1,21 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Build + Upload (esp32-c3-mini-1-debug)",
+			"type": "shell",
+			"command": "$env:USERPROFILE\\.platformio\\penv\\Scripts\\platformio.exe",
+			"args": [
+				"run",
+				"-e",
+				"esp32-c3-mini-1-debug",
+				"-t",
+				"upload"
+			],
+			"problemMatcher": [
+				"$gcc"
+			],
+			"group": "build"
+		}
+	]
+}

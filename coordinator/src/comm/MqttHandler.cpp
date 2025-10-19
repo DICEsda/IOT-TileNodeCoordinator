@@ -35,9 +35,10 @@ void MqttHandler::loop() {
 
 void MqttHandler::publishNodeState(const String& nodeId, const NodeInfo& state) {
     StaticJsonDocument<JSON_CAPACITY> doc;
-    doc["battery"] = state.batteryLevel;
+    // Use fields available on NodeInfo
+    doc["last_duty"] = state.lastDuty;
     doc["temperature"] = state.temperature;
-    doc["led_state"] = state.ledState;
+    doc["last_seen_ms"] = state.lastSeenMs;
     
     String payload;
     serializeJson(doc, payload);

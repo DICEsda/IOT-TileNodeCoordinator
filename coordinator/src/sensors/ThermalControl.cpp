@@ -97,7 +97,7 @@ void ThermalControl::setGlobalThermalLimits(float derateStartTemp, float derateM
     }
 }
 
-void ThermalControl::registerThermalAlertCallback(void (*callback)(const String&, const NodeThermalData&)) {
+void ThermalControl::registerThermalAlertCallback(std::function<void(const String&, const NodeThermalData&)> callback) {
     thermalAlertCallback = callback;
 }
 

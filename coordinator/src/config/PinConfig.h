@@ -8,14 +8,14 @@ namespace Pins {
     constexpr uint8_t MMWAVE_RX = 18;    // UART1 RX
     constexpr uint8_t MMWAVE_TX = 17;    // UART1 TX
     
-    // Status LEDs (ESP32-S3 has RGB LED on GPIO48)
-    constexpr uint8_t STATUS_LED = 48;   // Built-in RGB LED
-    constexpr uint8_t STATUS_R = 48;     // Red channel
-    constexpr uint8_t STATUS_G = 35;     // Green channel (activity)
-    constexpr uint8_t STATUS_B = 36;     // Blue channel (connection)
+    // Status LEDs (external SK6812B addressable strip)
+    constexpr uint8_t STATUS_LED = 15;   // Data pin for SK6812B strip (changed to GPIO15)
+    constexpr uint8_t STATUS_R = 0;     // Unused for addressable strip
+    constexpr uint8_t STATUS_G = 0;
+    constexpr uint8_t STATUS_B = 0;
     
-    // Button Input
-    constexpr uint8_t PAIRING_BUTTON = 0;    // BOOT button for pairing
+    // Button Input (external physical button labeled "node button")
+    constexpr uint8_t PAIRING_BUTTON = 42;    // External button connected to GPIO42
     
     // Optional External Sensors
     namespace External {
@@ -36,9 +36,9 @@ namespace Pins {
     
     // ESP32-S3 Built-in RGB LED control
     struct RgbLed {
-        static constexpr uint8_t PIN = STATUS_LED;
+        static constexpr uint8_t PIN = STATUS_LED; // NeoPixel data pin
         static constexpr uint8_t CHANNEL = 0;
-        static constexpr uint8_t NUM_PIXELS = 1;
+        static constexpr uint8_t NUM_PIXELS = 4;   // 4 SK6812B pixels
     };
     
     // WiFi Status LED Control
@@ -52,6 +52,6 @@ namespace Pins {
     namespace MmWave {
         static constexpr uint8_t UART_NUM = 1;
         static constexpr uint32_t BAUD_RATE = 115200;
-        static constexpr uint8_t RX_BUF_SIZE = 256;
+    static constexpr uint16_t RX_BUF_SIZE = 256;
     }
 }

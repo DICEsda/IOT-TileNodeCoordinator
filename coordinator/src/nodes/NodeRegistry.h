@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <map>
 #include <vector>
+#include <functional>
 #include <Preferences.h>
 #include "../Models.h"
 
@@ -20,8 +21,11 @@ public:
     
     // Pairing
     void startPairing(uint32_t durationMs = 30000);
+    void stopPairing();
     bool isPairingActive() const;
     bool processPairingRequest(const uint8_t* mac, const String& nodeId);
+    // Notification callback when a node is successfully registered
+    void setNodeRegisteredCallback(std::function<void(const String& nodeId, const String& lightId)> callback);
     
     // Node status
     void updateNodeStatus(const String& nodeId, uint8_t duty);
@@ -43,6 +47,7 @@ private:
     void loadFromStorage();
     void saveToStorage();
     void cleanupStaleNodes();
+    std::function<void(const String& nodeId, const String& lightId)> nodeRegisteredCallback = nullptr;
     
     static const char* STORAGE_NAMESPACE;
     static const uint32_t NODE_TIMEOUT_MS = 300000; // 5 minutes

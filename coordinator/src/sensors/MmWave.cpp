@@ -12,20 +12,21 @@ MmWave::~MmWave() {
 
 bool MmWave::begin() {
     // Initialize UART for mmWave sensor
-    Serial1.begin(Pins::MmWave::BAUD_RATE, SERIAL_8N1, Pins::MMWAVE_RX, Pins::MMWAVE_TX);
+    // IMPORTANT: setRxBufferSize MUST be called BEFORE begin()
     Serial1.setRxBufferSize(Pins::MmWave::RX_BUF_SIZE);
+    Serial1.begin(Pins::MmWave::BAUD_RATE, SERIAL_8N1, Pins::MMWAVE_RX, Pins::MMWAVE_TX);
     
     Logger::info("MmWave sensor initialized");
     return true;
 }
 
 void MmWave::loop() {
-    if (Serial2.available()) {
+    if (Serial1.available()) {
         processSerialData();
     }
 }
 
-void MmWave::setEventCallback(void (*callback)(const MmWaveEvent& event)) {
+void MmWave::setEventCallback(std::function<void(const MmWaveEvent& event)> callback) {
     eventCallback = callback;
 }
 

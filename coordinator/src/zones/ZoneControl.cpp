@@ -129,7 +129,7 @@ void ZoneControl::updateLightState(const String& lightId, bool active) {
 void ZoneControl::loadFromStorage() {
     Preferences prefs;
     if (!prefs.begin("zones", true)) {
-        Logger::error("Failed to load zone data");
+        Logger::warn("Failed to load zone data (NVS not initialized yet - this is normal on first boot)");
         return;
     }
     

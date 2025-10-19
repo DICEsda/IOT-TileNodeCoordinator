@@ -1,7 +1,9 @@
 #pragma once
 
 #include <Arduino.h>
+#include "../config/PinConfig.h"
 #include "../Models.h"
+#include <functional>
 
 class MmWave {
 public:
@@ -12,13 +14,12 @@ public:
     void loop();
 
     // Event handling
-    void setEventCallback(void (*callback)(const MmWaveEvent& event));
+    void setEventCallback(std::function<void(const MmWaveEvent& event)> callback);
 
 private:
     static constexpr uint32_t PRESENCE_DEBOUNCE_MS = 150;
-    #include "../config/PinConfig.h"
     
-    void (*eventCallback)(const MmWaveEvent& event);
+    std::function<void(const MmWaveEvent& event)> eventCallback;
     String currentZone;
     bool currentPresence;
     uint32_t lastEventTime;

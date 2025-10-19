@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
+#include <WiFi.h>
 #include <map>
 #include <functional>
 #include "../Models.h"

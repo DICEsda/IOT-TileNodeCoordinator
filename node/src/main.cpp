@@ -7,7 +7,7 @@
 #include "config/PinConfig.h"
 #include "utils/OtaUpdater.h"
 
-static constexpr uint16_t LED_NUM_PIXELS = 8; // adjust to your strip
+static constexpr uint16_t LED_NUM_PIXELS = 4; // default per PRD; adjust to your strip
 
 enum class UiState { NORMAL, PAIRING };
 
@@ -35,6 +35,9 @@ public:
             if (millis() - pairingStartMs >= pairingTimeoutMs) {
                 pairingFailedExit();
             }
+        } else if (mode == 3) {
+            // White breathing demo when not pairing
+            whiteBreatheAnimation();
         }
         handleSerial();
     }
@@ -48,26 +51,26 @@ private:
     uint8_t rainbowHue = 0;
     String serialBuf;
     uint32_t pairingStartMs = 0;
-    uint32_t pairingTimeoutMs = 30000; // 30 seconds
+    uint32_t pairingTimeoutMs = 10000; // 10 seconds
 
     void setMode(uint8_t m) {
         mode = m % 4;
         switch (mode) {
             case 0: // Off
                 led->setBrightness(0);
-                led->setColor(0,0,0);
+                led->setColor(0, 0, 0, 0);
                 break;
-            case 1: // Warm white low
+            case 1: // White low (use dedicated white channel)
                 led->setBrightness(32);
-                led->setColor(255, 180, 120, 300);
+                led->setColor(0, 0, 0, 255, 300);
                 break;
-            case 2: // Warm white high
+            case 2: // White high (use dedicated white channel)
                 led->setBrightness(128);
-                led->setColor(255, 200, 150, 300);
+                led->setColor(0, 0, 0, 255, 300);
                 break;
-            case 3: // Rainbow demo
+            case 3: // White breathe demo (use W channel only)
                 led->setBrightness(96);
-                // immediate color will be set by animation loop
+                // color/brightness will be updated by animation loop
                 break;
         }
     }
@@ -81,6 +84,13 @@ private:
         if (state == UiState::PAIRING) {
             state = UiState::NORMAL;
             setMode(mode); // restore current mode visuals
+            // Short green confirmation flash (status)
+            led->setBrightness(140);
+            led->setColor(0, 255, 0, 0); // green via RGB
+            delay(150);
+            led->setBrightness(0);
+            led->setColor(0, 0, 0, 0);
+            delay(80);
             Serial.println("Exit pairing mode");
         } else {
             state = UiState::PAIRING;
@@ -91,25 +101,35 @@ private:
     }
 
     void pairingAnimation() {
-        // Blink cyan smoothly at ~1Hz
+        // Pulse blue smoothly at ~1Hz using RGB channel (status)
         uint32_t now = millis();
         float t = (now % 1000) / 1000.0f; // 0..1
         // triangle wave 0..1..0
         float tri = t < 0.5f ? (t * 2.0f) : (2.0f - t * 2.0f);
         uint8_t b = 40 + (uint8_t)(tri * 120);
         led->setBrightness(b);
-        led->setColor(0, 255, 255); // cyan
+        led->setColor(0, 0, 255, 0); // blue via RGB
+    }
+
+    void whiteBreatheAnimation() {
+        // Smooth breathing on white channel (~2s period)
+        uint32_t now = millis();
+        float t = (now % 2000) / 2000.0f; // 0..1 over 2 seconds
+        float tri = t < 0.5f ? (t * 2.0f) : (2.0f - t * 2.0f);
+        uint8_t b = 16 + (uint8_t)(tri * 112); // 16..128
+        led->setBrightness(b);
+        led->setColor(0, 0, 0, 255); // keep W at max; brightness modulates output
     }
 
     void pairingFailedExit() {
         Serial.println("Pairing timeout: showing failure flash");
-        // Red-ish flash sequence (2 pulses)
+        // Red flash sequence (2 pulses) using RGB channel (status)
         for (int i = 0; i < 2; ++i) {
             led->setBrightness(150);
-            led->setColor(255, 50, 20); // warm red-orange
+            led->setColor(255, 0, 0, 0); // red
             delay(180);
             led->setBrightness(0);
-            led->setColor(0, 0, 0);
+            led->setColor(0, 0, 0, 0);
             delay(120);
         }
         state = UiState::NORMAL;
@@ -172,27 +192,23 @@ void loop() { app.loop(); }
 #include <esp_now.h>
 #include <esp_wifi.h>
 #include <esp_sleep.h>
-#include <driver/ledc.h>
-#include <driver/gpio.h>
-#include <esp_timer.h>
 #include <esp_random.h>
 
 #include "EspNowMessage.h"
 #include "ConfigManager.h"
-
-// Pin definitions (adjust based on your hardware)
-#define PWM_PIN 2
-#define BUTTON_PIN 0
-#define LED_PIN 1
+// RGBW LED + button
+#include "led/LedController.h"
+#include "input/ButtonInput.h"
+#include "config/PinConfig.h"
 
 // Node state machine
-enum class NodeState {
-    BOOT,
-    PAIRING,
-    OPERATIONAL,
-    UPDATE,
-    REBOOT
-};
+enum class NodeState { PAIRING, OPERATIONAL, UPDATE, REBOOT };
+
+// Forward declarations for ESP-NOW static callbacks
+class SmartTileNode;
+static SmartTileNode* gNodeInstance = nullptr;
+static void espnowRecv(const uint8_t* mac, const uint8_t* data, int len);
+static void espnowSent(const uint8_t* mac, esp_now_send_status_t status);
 
 class SmartTileNode {
 private:
@@ -203,15 +219,11 @@ private:
     uint8_t coordinatorMac[6];
     bool espNowInitialized;
     
-    // PWM
-    int pwmChannel;
-    int pwmResolution;
-    int pwmFrequency;
-    uint8_t currentDuty;
-    uint8_t targetDuty;
-    uint32_t fadeStartTime;
-    uint16_t fadeDuration;
-    bool fading;
+    // RGBW LED strip
+    LedController leds{4}; // PRD: 4 pixels per node
+    uint8_t curR = 0, curG = 0, curB = 0, curW = 0;
+    bool statusOverrideActive = false;
+    uint32_t statusOverrideUntilMs = 0;
     
     // Temperature removed; coordinator owns sensors and derating
     
@@ -223,8 +235,7 @@ private:
     uint16_t telemetryInterval;
     
     // Button
-    uint32_t lastButtonPress;
-    bool buttonPressed;
+    ButtonInput button;
     uint32_t pairingStartTime;
     bool inPairingMode;
     
@@ -246,7 +257,6 @@ public:
     
 private:
     // State machine
-    void handleBoot();
     void handlePairing();
     void handleOperational();
     // Derate handling removed; coordinator clamps brightness
@@ -255,22 +265,23 @@ private:
     
     // ESP-NOW
     bool initEspNow();
+public:
+    // Expose callbacks for static trampolines
     void onDataRecv(const uint8_t* mac, const uint8_t* data, int len);
     void onDataSent(const uint8_t* mac, esp_now_send_status_t status);
-    bool sendMessage(const EspNowMessage& message);
+private:
+    bool sendMessage(const EspNowMessage& message, const uint8_t* destMac = nullptr);
     void processReceivedMessage(const String& json);
+    bool ensureEncryptedPeer(const uint8_t mac[6], const String& lmkHex);
+    static bool parseHex16(const String& hex, uint8_t out[16]);
     
-    // PWM control
-    bool initPWM();
-    void setDuty(uint8_t value, uint16_t fadeMs = 0);
-    void updateFade();
-    // Thermal derating removed
+    // LED control
+    void applyColor(uint8_t r, uint8_t g, uint8_t b, uint8_t w, uint16_t fadeMs);
     
     // Temperature sensing removed
     
     // Power management
     void enterLightSleep();
-    void scheduleRxWindow();
     bool isRxWindowActive();
     
     // Button handling
@@ -293,24 +304,14 @@ private:
 };
 
 SmartTileNode::SmartTileNode() 
-    : currentState(NodeState::BOOT)
+    : currentState(NodeState::PAIRING)
     , config("node")
     , espNowInitialized(false)
-    , pwmChannel(0)
-    , pwmResolution(12)
-    , pwmFrequency(1000)
-    , currentDuty(0)
-    , targetDuty(0)
-    , fadeStartTime(0)
-    , fadeDuration(0)
-    , fading(false)
     , lastRxWindow(0)
     , rxWindowMs(20)
     , rxPeriodMs(100)
     , lastTelemetry(0)
     , telemetryInterval(30)
-    , lastButtonPress(0)
-    , buttonPressed(false)
     , pairingStartTime(0)
     , inPairingMode(false)
     , firmwareVersion("c3-1.0.0")
@@ -336,16 +337,13 @@ bool SmartTileNode::begin() {
     // Load configuration
     loadConfiguration();
     
-    // Initialize hardware
-    if (!initPWM()) {
-        logMessage("ERROR", "Failed to initialize PWM");
-        return false;
-    }
+    // Initialize LEDs
+    leds.begin();
+    leds.setBrightness(60);
     
     // Initialize button
-    pinMode(BUTTON_PIN, INPUT_PULLUP);
-    pinMode(LED_PIN, OUTPUT);
-    digitalWrite(LED_PIN, LOW);
+    button.begin(Pins::BUTTON);
+    button.onLongPress([this]() { this->startPairing(); }, 2000);
     
     // Initialize ESP-NOW
     if (!initEspNow()) {
@@ -356,9 +354,11 @@ bool SmartTileNode::begin() {
     // Determine initial state
     if (config.exists(ConfigKeys::NODE_ID) && config.exists(ConfigKeys::LIGHT_ID)) {
         currentState = NodeState::OPERATIONAL;
+        leds.setStatus(LedController::StatusMode::Idle);
         logMessage("INFO", "Starting in OPERATIONAL mode");
     } else {
         currentState = NodeState::PAIRING;
+        leds.setStatus(LedController::StatusMode::Pairing);
         logMessage("INFO", "Starting in PAIRING mode");
     }
     
@@ -367,11 +367,9 @@ bool SmartTileNode::begin() {
 
 void SmartTileNode::loop() {
     handleButton();
+    leds.update();
     
     switch (currentState) {
-        case NodeState::BOOT:
-            handleBoot();
-            break;
         case NodeState::PAIRING:
             handlePairing();
             break;
@@ -387,9 +385,6 @@ void SmartTileNode::loop() {
             break;
     }
     
-    // Update PWM fade
-    updateFade();
-    
     // Send telemetry periodically
     if (millis() - lastTelemetry > telemetryInterval * 1000) {
         sendTelemetry();
@@ -397,22 +392,13 @@ void SmartTileNode::loop() {
     }
     
     // Power management - enter light sleep if not in critical operations
-    if (currentState == NodeState::OPERATIONAL && !fading && !inPairingMode) {
+    if (currentState == NodeState::OPERATIONAL && !inPairingMode) {
         if (!isRxWindowActive()) {
             enterLightSleep();
         }
     }
     
     delay(10); // Small delay to prevent watchdog issues
-}
-
-void SmartTileNode::handleBoot() {
-    // Boot sequence completed, move to appropriate state
-    if (config.exists(ConfigKeys::NODE_ID)) {
-        currentState = NodeState::OPERATIONAL;
-    } else {
-        currentState = NodeState::PAIRING;
-    }
 }
 
 void SmartTileNode::handlePairing() {
@@ -432,16 +418,22 @@ void SmartTileNode::handlePairing() {
     if (millis() - lastJoinRequest > 5000) { // Every 5 seconds
         JoinRequestMessage joinReq;
         joinReq.mac = getMacAddress();
-        joinReq.caps.pwm = true;
-        joinReq.caps.temp_spi = true;
         joinReq.fw = firmwareVersion;
+        joinReq.caps.rgbw = true;
+        joinReq.caps.led_count = leds.numPixels();
+        joinReq.caps.temp_spi = false; // PRD: telemetry via coordinator; local temp optional
+        joinReq.caps.deep_sleep = true;
         joinReq.token = String(esp_random(), HEX);
+
+        String payload = joinReq.toJson();
         
-        // Send broadcast join request
-        esp_now_send(nullptr, (uint8_t*)joinReq.toJson().c_str(), joinReq.toJson().length());
-        lastJoinRequest = millis();
+        // Send to broadcast MAC address (FF:FF:FF:FF:FF:FF)
+        // nullptr doesn't work reliably for broadcasts in ESP-NOW
+        uint8_t broadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    esp_err_t result = esp_now_send(broadcastMac, (const uint8_t*)payload.c_str(), payload.length());
         
-        logMessage("DEBUG", "Sent join request");
+    lastJoinRequest = millis();
+    logMessage("DEBUG", String("Sent join request to broadcast, result=") + String((int)result));
     }
 }
 
@@ -465,19 +457,64 @@ void SmartTileNode::handleReboot() {
 
 bool SmartTileNode::initEspNow() {
     WiFi.mode(WIFI_STA);
+    WiFi.setSleep(false);
+    WiFi.disconnect();
     
     if (esp_now_init() != ESP_OK) {
+        logMessage("ERROR", "ESP-NOW init failed");
         return false;
     }
     
-    // NOTE: Callbacks should be bound to the object instance; omitted here as coordinator is not used in standalone
+    // Set a fixed channel (1) AFTER esp_now_init
+    // Must match the coordinator's channel
+    esp_wifi_set_promiscuous(true);
+    esp_err_t chRes = esp_wifi_set_channel(1, WIFI_SECOND_CHAN_NONE);
+    esp_wifi_set_promiscuous(false);
+    uint8_t primary = 0; wifi_second_chan_t second = WIFI_SECOND_CHAN_NONE;
+    esp_wifi_get_channel(&primary, &second);
+    logMessage("INFO", String("Channel set req=1 res=") + String((int)chRes) +
+                        String(" now=") + String((int)primary) +
+                        String(" second=") + String((int)second));
+    
+    // Add broadcast peer for pairing (unencrypted)
+    esp_now_peer_info_t broadcastPeer;
+    memset(&broadcastPeer, 0, sizeof(broadcastPeer));
+    memset(broadcastPeer.peer_addr, 0xFF, 6); // FF:FF:FF:FF:FF:FF
+    broadcastPeer.channel = 1;
+    broadcastPeer.encrypt = false;
+    esp_err_t addResult = esp_now_add_peer(&broadcastPeer);
+    if (addResult != ESP_OK) {
+        logMessage("ERROR", String("Failed to add broadcast peer: ") + String((int)addResult));
+    } else {
+        logMessage("INFO", String("Added broadcast peer"));
+    }
+    
+    // Register callbacks to instance via static trampolines
+    gNodeInstance = this;
+    esp_now_register_recv_cb(espnowRecv);
+    esp_now_register_send_cb(espnowSent);
+    
+    // Print MAC address for debugging
+    uint8_t mac[6];
+    WiFi.macAddress(mac);
+    char macStr[18];
+    snprintf(macStr, sizeof(macStr), "%02X:%02X:%02X:%02X:%02X:%02X",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     
     espNowInitialized = true;
+    String logMsg = "ESP-NOW initialized on channel 1, MAC: " + String(macStr);
+    logMessage("INFO", logMsg);
     return true;
 }
 
 void SmartTileNode::onDataRecv(const uint8_t* mac, const uint8_t* data, int len) {
     String message = String((char*)data, len);
+    // remember coordinator mac if unknown
+    if (mac && (coordinatorMac[0] == 0 && coordinatorMac[1] == 0 && coordinatorMac[2] == 0 && coordinatorMac[3] == 0 && coordinatorMac[4] == 0 && coordinatorMac[5] == 0)) {
+        memcpy(coordinatorMac, mac, 6);
+    }
+    // mark RX window
+    lastRxWindow = millis();
     processReceivedMessage(message);
 }
 
@@ -507,9 +544,13 @@ void SmartTileNode::processReceivedMessage(const String& json) {
             config.setString(ConfigKeys::LMK, accept->lmk);
             
             // Update configuration from coordinator
-            config.setInt(ConfigKeys::PWM_FREQ_HZ, accept->cfg.pwm_freq);
             config.setInt(ConfigKeys::RX_WINDOW_MS, accept->cfg.rx_window_ms);
             config.setInt(ConfigKeys::RX_PERIOD_MS, accept->cfg.rx_period_ms);
+
+            // Configure encrypted peer using LMK
+            if (!ensureEncryptedPeer(coordinatorMac, accept->lmk)) {
+                logMessage("ERROR", "Failed to configure encrypted peer");
+            }
             
             saveConfiguration();
             
@@ -517,6 +558,7 @@ void SmartTileNode::processReceivedMessage(const String& json) {
             sendTelemetry();
             currentState = NodeState::OPERATIONAL;
             stopPairing();
+            leds.setStatus(LedController::StatusMode::Idle);
             
             logMessage("INFO", "Successfully paired with coordinator");
             break;
@@ -524,8 +566,19 @@ void SmartTileNode::processReceivedMessage(const String& json) {
         case MessageType::SET_LIGHT: {
             SetLightMessage* setLight = static_cast<SetLightMessage*>(message);
             if (setLight->light_id == lightId) {
-                targetDuty = setLight->value;
-                setDuty(targetDuty, setLight->fade_ms);
+                // Respect override_status: temporarily disable status patterns
+                if (setLight->override_status) {
+                    statusOverrideActive = true;
+                    statusOverrideUntilMs = millis() + setLight->ttl_ms;
+                    leds.setStatus(LedController::StatusMode::None);
+                }
+
+                uint8_t r = setLight->r, g = setLight->g, b = setLight->b, w = setLight->w;
+                if (r == 0 && g == 0 && b == 0 && w == 0) {
+                    // fallback: map value to white channel
+                    w = setLight->value;
+                }
+                applyColor(r, g, b, w, setLight->fade_ms);
                 lastCmdId = setLight->cmd_id;
                 lastCommandTime = millis();
                 
@@ -534,7 +587,7 @@ void SmartTileNode::processReceivedMessage(const String& json) {
                 ack.cmd_id = setLight->cmd_id;
                 sendMessage(ack);
                 
-                logMessage("INFO", "Received set_light command: " + String(targetDuty));
+                logMessage("INFO", "Received set_light command");
             }
             break;
         }
@@ -546,40 +599,9 @@ void SmartTileNode::processReceivedMessage(const String& json) {
     delete message;
 }
 
-bool SmartTileNode::initPWM() {
-    ledcSetup(pwmChannel, pwmFrequency, pwmResolution);
-    ledcAttachPin(PWM_PIN, pwmChannel);
-    ledcWrite(pwmChannel, 0);
-    
-    return true;
-}
-
-void SmartTileNode::setDuty(uint8_t value, uint16_t fadeMs) {
-    if (fadeMs == 0) {
-        currentDuty = value;
-        ledcWrite(pwmChannel, value << (pwmResolution - 8));
-        fading = false;
-    } else {
-        targetDuty = value;
-        fadeStartTime = millis();
-        fadeDuration = fadeMs;
-        fading = true;
-    }
-}
-
-void SmartTileNode::updateFade() {
-    if (!fading) return;
-    
-    uint32_t elapsed = millis() - fadeStartTime;
-    if (elapsed >= fadeDuration) {
-        currentDuty = targetDuty;
-        ledcWrite(pwmChannel, currentDuty << (pwmResolution - 8));
-        fading = false;
-    } else {
-        float progress = (float)elapsed / fadeDuration;
-        uint8_t newDuty = currentDuty + (targetDuty - currentDuty) * progress;
-        ledcWrite(pwmChannel, newDuty << (pwmResolution - 8));
-    }
+void SmartTileNode::applyColor(uint8_t r, uint8_t g, uint8_t b, uint8_t w, uint16_t fadeMs) {
+    curR = r; curG = g; curB = b; curW = w;
+    leds.setColor(r, g, b, w, fadeMs);
 }
 
 // Thermal derating function removed
@@ -595,42 +617,30 @@ void SmartTileNode::enterLightSleep() {
     lastRxWindow = millis();
 }
 
-void SmartTileNode::scheduleRxWindow() {
-    lastRxWindow = millis();
-}
-
 bool SmartTileNode::isRxWindowActive() {
     return (millis() - lastRxWindow) < rxWindowMs;
 }
 
 void SmartTileNode::handleButton() {
-    bool currentButtonState = !digitalRead(BUTTON_PIN);
-    
-    if (currentButtonState && !buttonPressed) {
-        buttonPressed = true;
-        lastButtonPress = millis();
-        
-        if (currentState == NodeState::OPERATIONAL) {
-            // Button press in operational mode - could be used for manual control
-            logMessage("INFO", "Button pressed in operational mode");
-        } else if (currentState == NodeState::PAIRING) {
-            startPairing();
-        }
-    } else if (!currentButtonState && buttonPressed) {
-        buttonPressed = false;
+    button.loop();
+    // Clear status override when TTL expires
+    if (statusOverrideActive && millis() > statusOverrideUntilMs) {
+        statusOverrideActive = false;
+        leds.setStatus(currentState == NodeState::PAIRING ? LedController::StatusMode::Pairing
+                                                          : LedController::StatusMode::Idle);
     }
 }
 
 void SmartTileNode::startPairing() {
     inPairingMode = true;
     pairingStartTime = millis();
-    digitalWrite(LED_PIN, HIGH);
+    leds.setStatus(LedController::StatusMode::Pairing);
     logMessage("INFO", "Pairing mode started");
 }
 
 void SmartTileNode::stopPairing() {
     inPairingMode = false;
-    digitalWrite(LED_PIN, LOW);
+    leds.setStatus(LedController::StatusMode::Idle);
     logMessage("INFO", "Pairing mode stopped");
 }
 
@@ -638,8 +648,9 @@ void SmartTileNode::sendTelemetry() {
     NodeStatusMessage status;
     status.node_id = nodeId;
     status.light_id = lightId;
-    status.temp_c = 0.0;
-    status.duty = currentDuty;
+    status.avg_r = curR; status.avg_g = curG; status.avg_b = curB; status.avg_w = curW;
+    status.status_mode = (currentState == NodeState::PAIRING) ? "pairing"
+                        : (statusOverrideActive ? "override" : "operational");
     status.fw = firmwareVersion;
     status.vbat_mv = readBatteryVoltage();
     
@@ -656,8 +667,6 @@ void SmartTileNode::loadConfiguration() {
     nodeId = config.getString(ConfigKeys::NODE_ID);
     lightId = config.getString(ConfigKeys::LIGHT_ID);
     
-    pwmFrequency = config.getInt(ConfigKeys::PWM_FREQ_HZ, Defaults::PWM_FREQ_HZ);
-    pwmResolution = config.getInt(ConfigKeys::PWM_RESOLUTION_BITS, Defaults::PWM_RESOLUTION_BITS);
     telemetryInterval = config.getInt(ConfigKeys::TELEMETRY_INTERVAL_S, Defaults::TELEMETRY_INTERVAL_S);
     rxWindowMs = config.getInt(ConfigKeys::RX_WINDOW_MS, Defaults::RX_WINDOW_MS);
     rxPeriodMs = config.getInt(ConfigKeys::RX_PERIOD_MS, Defaults::RX_PERIOD_MS);
@@ -684,6 +693,57 @@ String SmartTileNode::getMacAddress() {
     return String(macStr);
 }
 
+bool SmartTileNode::sendMessage(const EspNowMessage& message, const uint8_t* destMac) {
+    String json = message.toJson();
+    const uint8_t* target = destMac;
+    uint8_t broadcast[6] = {0};
+    if (!target) {
+        bool known = false;
+        for (int i=0;i<6;i++) { if (coordinatorMac[i] != 0) { known = true; break; } }
+        target = known ? coordinatorMac : broadcast;
+    }
+    esp_err_t res = esp_now_send(target, (const uint8_t*)json.c_str(), json.length());
+    return res == ESP_OK;
+}
+
+bool SmartTileNode::ensureEncryptedPeer(const uint8_t mac[6], const String& lmkHex) {
+    if (!mac) return false;
+    // Remove existing peer if present
+    esp_now_del_peer(mac);
+    uint8_t lmk[16] = {0};
+    if (!parseHex16(lmkHex, lmk)) return false;
+    // Set PMK as well (optional but recommended)
+    esp_now_set_pmk(lmk);
+    esp_now_peer_info_t peer{};
+    memcpy(peer.peer_addr, mac, 6);
+    peer.channel = 0; // current channel
+    peer.encrypt = true;
+    memcpy(peer.lmk, lmk, 16);
+    return esp_now_add_peer(&peer) == ESP_OK;
+}
+
+bool SmartTileNode::parseHex16(const String& hex, uint8_t out[16]) {
+    if (!out) return false;
+    String s = hex;
+    // remove potential separators
+    s.replace(":", ""); s.replace("-", ""); s.replace(" ", "");
+    if (s.length() < 32) return false;
+    for (int i=0;i<16;i++) {
+        char b1 = s[2*i];
+        char b2 = s[2*i+1];
+        auto toNib = [](char c)->int{
+            if (c>='0'&&c<='9') return c-'0';
+            if (c>='a'&&c<='f') return 10 + (c - 'a');
+            if (c>='A'&&c<='F') return 10 + (c - 'A');
+            return -1;
+        };
+        int n1 = toNib(b1), n2 = toNib(b2);
+        if (n1<0||n2<0) return false;
+        out[i] = (uint8_t)((n1<<4)|n2);
+    }
+    return true;
+}
+
 void SmartTileNode::logMessage(const String& level, const String& message) {
     uint32_t timestamp = millis();
     Serial.printf("[%lu] [%s] %s\n", timestamp, level.c_str(), message.c_str());
@@ -693,14 +753,34 @@ void SmartTileNode::logMessage(const String& level, const String& message) {
 SmartTileNode node;
 
 void setup() {
+    // Give USB-Serial time to enumerate
+    delay(2000);
+    Serial.begin(115200);
+    delay(500);
+    
+    Serial.println("=== ESP32-C3 BOOT ===");
+    Serial.println("Setup starting...");
+    
     if (!node.begin()) {
         Serial.println("Failed to initialize node");
         while (1) {
             delay(1000);
         }
     }
+    
+    Serial.println("Setup complete!");
 }
 
 void loop() {
     node.loop();
 }
+
+// Static trampolines for ESP-NOW callbacks (placed after class definition)
+static void espnowRecv(const uint8_t* mac, const uint8_t* data, int len) {
+    if (gNodeInstance) gNodeInstance->onDataRecv(mac, data, len);
+}
+static void espnowSent(const uint8_t* mac, esp_now_send_status_t status) {
+    if (gNodeInstance) gNodeInstance->onDataSent(mac, status);
+}
+
+#endif // STANDALONE_TEST

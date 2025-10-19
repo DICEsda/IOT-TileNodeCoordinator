@@ -5,7 +5,7 @@
 // ESP32-C3-MINI-1 Pin Configuration
 namespace Pins {
     // LED Configuration
-    constexpr uint8_t LED_DATA = 2;      // WS2812/SK6812 data pin (GPIO2 supports RMT)
+    constexpr uint8_t LED_DATA = 1;      // WS2812/SK6812 data pin
     constexpr uint8_t STATUS_LED = 8;    // Built-in RGB LED (WS2812) on GPIO8
     
     // Temperature Sensor (SPI)
@@ -15,7 +15,7 @@ namespace Pins {
     constexpr uint8_t TEMP_CS = 7;       // SPI Chip Select
     
     // Button Input
-    constexpr uint8_t BUTTON = 9;        // GPIO9 for button input
+    constexpr uint8_t BUTTON = 3;        // GPIO4 for button input
     
     // Power Management
     constexpr uint8_t POWER_EN = 3;      // GPIO3 for power control (if needed)
@@ -26,7 +26,7 @@ namespace Pins {
     
     // I2C (Reserved/Optional)
     constexpr uint8_t I2C_SDA = 10;      // I2C SDA
-    constexpr uint8_t I2C_SCL = 1;       // I2C SCL
+    constexpr uint8_t I2C_SCL = 2;       // I2C SCL (moved from 1 to avoid LED data conflict)
     
     // ESP32-C3-MINI-1 Built-in LED control
     struct RgbLed {

@@ -1,53 +1,40 @@
+// Minimal PowerManager interface matching current implementation
 #pragma once
 
 #include <Arduino.h>
 #include <esp_sleep.h>
-#include <driver/rtc_io.h>
-#include "../config/PinConfig.h"
 
 class PowerManager {
 public:
-    PowerManager();
+    PowerManager() = default;
     ~PowerManager() = default;
 
-    void begin();
-    void loop();
+    // Configure RX timing window/period (milliseconds)
+    inline void configure(uint16_t windowMs, uint16_t periodMs) {
+        rxWindowMs = windowMs;
+        rxPeriodMs = periodMs;
+    }
 
-    // Sleep control
-    void scheduleWakeup(uint32_t milliseconds);
-    void enterLightSleep();
-    void enterDeepSleep(uint32_t seconds = 0);
-    
-    // Power state management
-    void setRxWindow(uint32_t interval_ms);
-    void extendWakeTime(uint32_t milliseconds);
-    bool canSleep() const;
-    
-    // Power monitoring
-    float getBatteryVoltage() const;
-    uint8_t getBatteryPercent() const;
-    bool isLowBattery() const;
-    
-    // Event callbacks
-    using PowerCallback = void (*)(const char* event, float value);
-    void setPowerCallback(PowerCallback callback);
+    // Enter light sleep only when idle and outside RX window
+    inline void enterLightSleepIfIdle(bool isIdle) {
+        if (!isIdle) return;
+        if (isRxWindowActive()) return;
+        esp_sleep_enable_timer_wakeup((uint64_t)rxPeriodMs * 1000ULL);
+        esp_light_sleep_start();
+        lastRxWindow = millis();
+    }
+
+    // Query/mark RX window
+    inline bool isRxWindowActive() const {
+        return (millis() - lastRxWindow) < rxWindowMs;
+    }
+
+    inline void markRxWindow() {
+        lastRxWindow = millis();
+    }
 
 private:
-    static constexpr uint32_t MIN_SLEEP_MS = 50;
-    static constexpr float LOW_BATTERY_THRESHOLD = 3.3f;
-    static constexpr uint8_t VOLTAGE_PIN = 1;   // ADC1_CH1
-    
-    uint32_t lastRxWindow;
-    uint32_t rxInterval;
-    uint32_t forcedWakeUntil;
-    PowerCallback callback;
-    
-    void configurePowerPins();
-    void setupVoltageMonitor();
-    float readVoltage() const;
-    void checkBatteryStatus();
-    
-    // Sleep helpers
-    void prepareForSleep();
-    void wakeupFromSleep();
+    uint32_t lastRxWindow{0};
+    uint16_t rxWindowMs{20};
+    uint16_t rxPeriodMs{100};
 };

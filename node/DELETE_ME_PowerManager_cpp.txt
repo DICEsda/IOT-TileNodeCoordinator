@@ -1,0 +1,2 @@
+This file exists to indicate that we attempted to delete src/power/PowerManager.cpp but the tool could not remove it.
+Please manually delete c:\Users\yahya\Desktop\IOT-TileNodeCoordinator\node\src\power\PowerManager.cpp, as the implementation has been inlined in PowerManager.h.
