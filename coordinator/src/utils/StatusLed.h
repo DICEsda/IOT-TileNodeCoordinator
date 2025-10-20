@@ -25,10 +25,20 @@ public:
     }
 
     void loop() {
-        if (active && millis() >= pulseEnd) {
-            // Turn off all pixels
-            setAll(0, 0, 0);
+        uint32_t now = millis();
+        if (active && now >= pulseEnd) {
+            // End pulse
             active = false;
+        }
+        if (idleBreathing && !active) {
+            // Warm white breathing at ~2s period, 10% brightness target
+            float t = (now % 2000) / 2000.0f;
+            float tri = t < 0.5f ? (t * 2.0f) : (2.0f - t * 2.0f);
+            uint8_t w = 25 + (uint8_t)(tri * 30); // ~10%-20%
+            setAllWarmWhite(w);
+        } else if (!active) {
+            // If neither breathing nor pulse, ensure off
+            // no-op to avoid flicker; state functions will set color
         }
     }
 
@@ -39,9 +49,25 @@ public:
         strip.show();
     }
 
+    void setIdleBreathing(bool enable) {
+        idleBreathing = enable;
+        if (!enable && !active) {
+            // Clear to off when disabling idle state
+            setAll(0, 0, 0);
+        }
+    }
+
+    void setAllWarmWhite(uint8_t w) {
+        for (uint8_t i = 0; i < strip.numPixels(); ++i) {
+            strip.setPixelColor(i, strip.Color(0, 0, 0, w));
+        }
+        strip.show();
+    }
+
 private:
     Adafruit_NeoPixel strip;
     bool active = false;
     uint32_t pulseEnd = 0;
     uint8_t targetR = 0, targetG = 0, targetB = 0;
+    bool idleBreathing = false;
 };

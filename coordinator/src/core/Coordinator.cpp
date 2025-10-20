@@ -13,21 +13,22 @@ Coordinator::Coordinator()
 
 
 Coordinator::~Coordinator() {
-    delete espNow;
-    delete mqtt;
-    delete mmWave;
-    delete nodes;
-    delete zones;
-    delete buttons;
-    delete thermal;
+    // Clean up in reverse order of initialization
+    if (thermal) { delete thermal; thermal = nullptr; }
+    if (buttons) { delete buttons; buttons = nullptr; }
+    if (zones) { delete zones; zones = nullptr; }
+    if (nodes) { delete nodes; nodes = nullptr; }
+    if (mmWave) { delete mmWave; mmWave = nullptr; }
+    if (mqtt) { delete mqtt; mqtt = nullptr; }
+    if (espNow) { delete espNow; espNow = nullptr; }
 }
 
 bool Coordinator::begin() {
-    Logger::begin(115200);
+    // Don't call Logger::begin here - it's already called in main.cpp
+    Logger::setMinLevel(Logger::DEBUG); // Temporarily DEBUG to see RX activity
     delay(500);
     
-    Logger::info("=== Smart Tile Coordinator Starting ===");
-    Logger::info("Initializing components...");
+    Logger::info("Smart Tile Coordinator starting...");
 
     espNow = new EspNow();
     mqtt = new Mqtt();
@@ -47,8 +48,19 @@ bool Coordinator::begin() {
     }
     Logger::info("ESP-NOW initialized successfully");
 
+    // Register message callback for regular node messages
+    espNow->setMessageCallback([this](const String& nodeId, const uint8_t* data, size_t len) {
+        if (data && len > 0) {
+            this->handleNodeMessage(nodeId, data, len);
+        }
+    });
+
     // Register pairing callback to handle join requests coming from nodes
     espNow->setPairingCallback([this](const uint8_t* mac, const uint8_t* data, size_t len) {
+        if (!mac || !data || len == 0) {
+            Logger::warn("Invalid pairing callback parameters");
+            return;
+        }
         String payload((const char*)data, len);
         MessageType mt = MessageFactory::getMessageType(payload);
         if (mt != MessageType::JOIN_REQUEST) {
@@ -73,33 +85,15 @@ bool Coordinator::begin() {
             return;
         }
 
-        uint8_t lmk[16];
-        esp_fill_random(lmk, sizeof(lmk));
-
-        // Configure the esp-now peer on coordinator
-        esp_now_del_peer(mac);
-        esp_now_peer_info_t peer{};
-        memcpy(peer.peer_addr, mac, 6);
-        peer.channel = 0;
-        peer.encrypt = true;
-        memcpy(peer.lmk, lmk, sizeof(lmk));
-        if (esp_now_add_peer(&peer) != ESP_OK) {
-            Logger::error("Failed to add esp-now peer for %s", macStr);
-        } else {
-            Logger::info("Added esp-now peer for %s", macStr);
-        }
-
-        esp_err_t sres = esp_now_set_pmk(lmk);
-        if (sres != ESP_OK) {
-            Logger::warn("esp_now_set_pmk returned %d", sres);
+        // Add as ESP-NOW peer via ESPNowW (unencrypted)
+        if (!espNow->addPeer(mac)) {
+            Logger::error("Failed to add ESP-NOW peer for %s", macStr);
         }
 
         JoinAcceptMessage accept;
         accept.node_id = nodeId;
         accept.light_id = nodes->getLightForNode(nodeId);
-        char hexbuf[33];
-        for (int i = 0; i < 16; ++i) snprintf(&hexbuf[i*2], 3, "%02X", lmk[i]);
-        accept.lmk = String(hexbuf);
+        accept.lmk = ""; // Using unencrypted ESP-NOW in ESPNowW path
         String json = accept.toJson();
 
         // send back to node mac
@@ -161,13 +155,8 @@ bool Coordinator::begin() {
         return false;
     }
 
-    // Open a short pairing window on boot so users can quickly pair tiles
-    constexpr uint32_t BOOT_PAIRING_MS = 10000;
-    nodes->startPairing(BOOT_PAIRING_MS);
-    espNow->enablePairingMode();
-    // Slow pulsing cyan/blue for the boot pairing window
-    statusLed.pulse(0, 150, 255, BOOT_PAIRING_MS);
-    Logger::info("Boot pairing window open for 10 seconds...");
+    // Do NOT auto-open pairing window on boot; pairing must be manual via button
+    statusLed.setIdleBreathing(true); // idle warm white breathing
 
     if (!buttons->begin()) {
         Logger::error("Failed to initialize button control");
@@ -200,18 +189,31 @@ bool Coordinator::begin() {
 }
 
 void Coordinator::loop() {
-    espNow->loop();
-    mqtt->loop();
-    mmWave->loop();
-    nodes->loop();
-    zones->loop();
-    buttons->loop();
-    thermal->loop();
+    // Use guard checks to prevent null pointer crashes
+    if (espNow) espNow->loop();
+    if (mqtt) mqtt->loop();
+    if (mmWave) mmWave->loop();
+    if (nodes) nodes->loop();
+    if (zones) zones->loop();
+    if (buttons) buttons->loop();
+    if (thermal) thermal->loop();
+    
     // Update status LED (non-blocking)
     statusLed.loop();
+    
+    // Maintain LED state based on pairing
+    if (nodes && !nodes->isPairingActive()) {
+        statusLed.setIdleBreathing(true);
+    }
 }
 
 void Coordinator::onMmWaveEvent(const MmWaveEvent& event) {
+    // Guard against null pointers
+    if (!zones || !nodes || !thermal || !espNow || !mqtt) {
+        Logger::error("Cannot process mmWave event: components not initialized");
+        return;
+    }
+    
     // Process presence detection
     auto affectedLights = zones->getLightsForZone(event.sensorId);
     for (const auto& lightId : affectedLights) {
@@ -231,6 +233,12 @@ void Coordinator::onMmWaveEvent(const MmWaveEvent& event) {
 }
 
 void Coordinator::onThermalEvent(const String& nodeId, const NodeThermalData& data) {
+    // Guard against null pointers
+    if (!mqtt || !nodes || !zones || !espNow) {
+        Logger::error("Cannot process thermal event: components not initialized");
+        return;
+    }
+    
     // Handle thermal alerts
     Logger::warning("Thermal alert for node %s: %.1f°C, deration: %d%%",
                    nodeId.c_str(), data.temperature, data.derationLevel);
@@ -246,28 +254,31 @@ void Coordinator::onThermalEvent(const String& nodeId, const NodeThermalData& da
 }
 
 void Coordinator::onButtonEvent(const String& buttonId, bool pressed) {
-    // Handle button events (pairing, etc)
-    if (pressed) {
-        Logger::info("Button pressed - ENTERING pairing mode");
-        
-        // Enter pairing mode (stays active while button is held)
-        nodes->startPairing(60000); // 60 second timeout as safety
-        espNow->enablePairingMode();
-        
-        // Pulsing blue LED indicates pairing mode is active and waiting for nodes
-        statusLed.pulse(0, 100, 255, 60000); // Blue pulsing
-        
-        Logger::info("Pairing mode ACTIVE - waiting for nodes to pair...");
-    } else {
-        Logger::info("Button released - EXITING pairing mode");
-        
-        // Stop pairing when button is released
-        nodes->stopPairing();
-        espNow->disablePairingMode();
-        
-        // Turn LED off or show idle state (dim white)
-        statusLed.setAll(10, 10, 10); // Dim white for idle
-        
-        Logger::info("Pairing mode CLOSED");
+    // Guard against null pointers
+    if (!nodes || !espNow) {
+        Logger::error("Cannot process button event: components not initialized");
+        return;
     }
+    
+    // Short press opens a pairing window; release does nothing special
+    if (pressed) {
+        Logger::info("Pairing button pressed - opening pairing window");
+        const uint32_t windowMs = 60000; // 60s pairing window
+        nodes->startPairing(windowMs);
+        espNow->enablePairingMode(windowMs);
+        statusLed.setIdleBreathing(false);
+        statusLed.pulse(0, 100, 255, windowMs); // Blue pulse while pairing
+        Logger::info("Pairing window open for %d ms", windowMs);
+    }
+}
+
+void Coordinator::handleNodeMessage(const String& nodeId, const uint8_t* data, size_t len) {
+    Logger::info("Received message from node %s: %d bytes", nodeId.c_str(), len);
+    
+    // Parse the JSON payload
+    String payload((const char*)data, len);
+    Logger::debug("Payload: %s", payload.c_str());
+    
+    // TODO: Add message handling logic here based on message type
+    // For now, just log the received message
 }

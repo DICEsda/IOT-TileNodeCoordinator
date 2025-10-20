@@ -40,6 +40,7 @@ private:
     std::map<String, NodeInfo> nodes;
     std::map<String, String> lightToNode;  // lightId -> nodeId
     Preferences prefs;
+    bool prefsInitialized;
     
     bool pairingActive;
     uint32_t pairingEndTime;

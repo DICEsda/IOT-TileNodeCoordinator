@@ -189,8 +189,8 @@ void loop() { app.loop(); }
 
 #include <Arduino.h>
 #include <WiFi.h>
-#include <esp_now.h>
 #include <esp_wifi.h>
+#include <esp_now.h>
 #include <esp_sleep.h>
 #include <esp_random.h>
 
@@ -204,10 +204,10 @@ void loop() { app.loop(); }
 // Node state machine
 enum class NodeState { PAIRING, OPERATIONAL, UPDATE, REBOOT };
 
-// Forward declarations for ESP-NOW static callbacks
+// Forward declarations for ESP-NOW v2 static callbacks
 class SmartTileNode;
 static SmartTileNode* gNodeInstance = nullptr;
-static void espnowRecv(const uint8_t* mac, const uint8_t* data, int len);
+static void espnowRecv(const esp_now_recv_info_t* recv_info, const uint8_t* data, int len);
 static void espnowSent(const uint8_t* mac, esp_now_send_status_t status);
 
 class SmartTileNode {
@@ -391,14 +391,16 @@ void SmartTileNode::loop() {
         lastTelemetry = millis();
     }
     
-    // Power management - enter light sleep if not in critical operations
-    if (currentState == NodeState::OPERATIONAL && !inPairingMode) {
+    // Power management - avoid light sleep if we are animating to keep FPS high
+    bool animating = leds.isAnimating();
+    if (currentState == NodeState::OPERATIONAL && !inPairingMode && !animating) {
         if (!isRxWindowActive()) {
             enterLightSleep();
         }
     }
-    
-    delay(10); // Small delay to prevent watchdog issues
+
+    // Smaller delay when animating for smoother visuals
+    delay(animating ? 1 : 10);
 }
 
 void SmartTileNode::handlePairing() {
@@ -421,19 +423,25 @@ void SmartTileNode::handlePairing() {
         joinReq.fw = firmwareVersion;
         joinReq.caps.rgbw = true;
         joinReq.caps.led_count = leds.numPixels();
-        joinReq.caps.temp_spi = false; // PRD: telemetry via coordinator; local temp optional
+        joinReq.caps.temp_spi = false;
         joinReq.caps.deep_sleep = true;
         joinReq.token = String(esp_random(), HEX);
 
         String payload = joinReq.toJson();
         
-        // Send to broadcast MAC address (FF:FF:FF:FF:FF:FF)
-        // nullptr doesn't work reliably for broadcasts in ESP-NOW
-        uint8_t broadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-    esp_err_t result = esp_now_send(broadcastMac, (const uint8_t*)payload.c_str(), payload.length());
+        // ✓ Checklist: Message Size check
+        if (payload.length() > 250) {
+            logMessage("ERROR", "JOIN_REQUEST too large!");
+            return;
+        }
         
-    lastJoinRequest = millis();
-    logMessage("DEBUG", String("Sent join request to broadcast, result=") + String((int)result));
+        // Send to broadcast MAC address using native ESP-NOW v2
+        uint8_t broadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+        esp_err_t result = esp_now_send(broadcastMac, (uint8_t*)payload.c_str(), payload.length());
+        
+        lastJoinRequest = millis();
+        logMessage("DEBUG", String("Sent JOIN_REQUEST (") + String(payload.length()) + 
+                   " bytes), result=" + String((int)result));
     }
 }
 
@@ -456,62 +464,122 @@ void SmartTileNode::handleReboot() {
 }
 
 bool SmartTileNode::initEspNow() {
+    logMessage("INFO", "===========================================");
+    logMessage("INFO", "ESP-NOW V2.0 INITIALIZATION (NODE)");
+    logMessage("INFO", "===========================================");
+    
+    // ✓ Checklist: Wi-Fi Mode - Set to STA only
+    logMessage("INFO", "[1/9] Setting WiFi mode to STA...");
     WiFi.mode(WIFI_STA);
     WiFi.setSleep(false);
     WiFi.disconnect();
+    delay(100);
     
-    if (esp_now_init() != ESP_OK) {
-        logMessage("ERROR", "ESP-NOW init failed");
+    if (WiFi.getMode() != WIFI_STA) {
+        logMessage("ERROR", "WiFi mode is not STA!");
         return false;
     }
     
-    // Set a fixed channel (1) AFTER esp_now_init
-    // Must match the coordinator's channel
-    esp_wifi_set_promiscuous(true);
-    esp_err_t chRes = esp_wifi_set_channel(1, WIFI_SECOND_CHAN_NONE);
-    esp_wifi_set_promiscuous(false);
-    uint8_t primary = 0; wifi_second_chan_t second = WIFI_SECOND_CHAN_NONE;
-    esp_wifi_get_channel(&primary, &second);
-    logMessage("INFO", String("Channel set req=1 res=") + String((int)chRes) +
-                        String(" now=") + String((int)primary) +
-                        String(" second=") + String((int)second));
-    
-    // Add broadcast peer for pairing (unencrypted)
-    esp_now_peer_info_t broadcastPeer;
-    memset(&broadcastPeer, 0, sizeof(broadcastPeer));
-    memset(broadcastPeer.peer_addr, 0xFF, 6); // FF:FF:FF:FF:FF:FF
-    broadcastPeer.channel = 1;
-    broadcastPeer.encrypt = false;
-    esp_err_t addResult = esp_now_add_peer(&broadcastPeer);
-    if (addResult != ESP_OK) {
-        logMessage("ERROR", String("Failed to add broadcast peer: ") + String((int)addResult));
-    } else {
-        logMessage("INFO", String("Added broadcast peer"));
-    }
-    
-    // Register callbacks to instance via static trampolines
-    gNodeInstance = this;
-    esp_now_register_recv_cb(espnowRecv);
-    esp_now_register_send_cb(espnowSent);
-    
-    // Print MAC address for debugging
+    // ✓ Checklist: MAC Address - Get programmatically
+    logMessage("INFO", "[2/9] Getting MAC address...");
     uint8_t mac[6];
     WiFi.macAddress(mac);
     char macStr[18];
     snprintf(macStr, sizeof(macStr), "%02X:%02X:%02X:%02X:%02X:%02X",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    logMessage("INFO", String("  Node MAC: ") + String(macStr));
+    
+    // ✓ Checklist: ESP-NOW Version - Initialize v2.0
+    logMessage("INFO", "[3/9] Initializing ESP-NOW v2.0...");
+    esp_err_t initResult = esp_now_init();
+    if (initResult != ESP_OK) {
+        logMessage("ERROR", String("esp_now_init() failed: ") + String((int)initResult));
+        return false;
+    }
+    logMessage("INFO", "  ESP-NOW v2.0 initialized");
+    
+    // Set WiFi channel to 1 (must match coordinator)
+    logMessage("INFO", "[4/9] Setting WiFi channel to 1...");
+    esp_wifi_set_promiscuous(true);
+    esp_err_t chRes = esp_wifi_set_channel(1, WIFI_SECOND_CHAN_NONE);
+    esp_wifi_set_promiscuous(false);
+    
+    uint8_t primary = 0; 
+    wifi_second_chan_t second = WIFI_SECOND_CHAN_NONE;
+    esp_wifi_get_channel(&primary, &second);
+    
+    if (primary != 1) {
+        logMessage("ERROR", String("Failed to set channel! Now on: ") + String((int)primary));
+        return false;
+    }
+    logMessage("INFO", String("  Channel: ") + String((int)primary));
+    
+    // Set WiFi protocol for compatibility
+    logMessage("INFO", "[5/9] Setting WiFi protocol...");
+    esp_err_t protocolRes = esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
+    if (protocolRes == ESP_OK) {
+        logMessage("INFO", "  WiFi protocol set (802.11b/g/n)");
+    }
+    
+    // ✓ Checklist: Callbacks - Register v2 callbacks
+    logMessage("INFO", "[6/9] Registering ESP-NOW v2 callbacks...");
+    gNodeInstance = this;
+    
+    esp_err_t recvResult = esp_now_register_recv_cb(espnowRecv);
+    if (recvResult != ESP_OK) {
+        logMessage("ERROR", String("Failed to register recv callback: ") + String((int)recvResult));
+        return false;
+    }
+    
+    esp_err_t sendResult = esp_now_register_send_cb(espnowSent);
+    if (sendResult != ESP_OK) {
+        logMessage("ERROR", String("Failed to register send callback: ") + String((int)sendResult));
+        return false;
+    }
+    logMessage("INFO", "  Callbacks registered");
+    
+    // ✓ Checklist: Peer Registration - Add broadcast peer
+    logMessage("INFO", "[7/9] Adding broadcast peer...");
+    uint8_t bcast[6]; 
+    memset(bcast, 0xFF, 6);
+    
+    esp_now_peer_info_t peerInfo = {};
+    memcpy(peerInfo.peer_addr, bcast, 6);
+    peerInfo.channel = 1;
+    peerInfo.encrypt = false;
+    peerInfo.ifidx = WIFI_IF_STA;
+    
+    esp_err_t bres = esp_now_add_peer(&peerInfo);
+    if (bres == ESP_OK || bres == ESP_ERR_ESPNOW_EXIST) {
+        logMessage("INFO", "  Broadcast peer added (FF:FF:FF:FF:FF:FF)");
+    } else {
+        logMessage("ERROR", String("Failed to add broadcast peer: ") + String((int)bres));
+    }
+    
+    logMessage("INFO", "[8/9] Setting TX power to maximum...");
+    WiFi.setTxPower(WIFI_POWER_19_5dBm);
+    
+    logMessage("INFO", "[9/9] ESP-NOW v2.0 initialization complete");
+    logMessage("INFO", "===========================================");
     
     espNowInitialized = true;
-    String logMsg = "ESP-NOW initialized on channel 1, MAC: " + String(macStr);
-    logMessage("INFO", logMsg);
     return true;
 }
 
 void SmartTileNode::onDataRecv(const uint8_t* mac, const uint8_t* data, int len) {
+    // Log every received message for debugging
+    char macStr[18];
+    snprintf(macStr, sizeof(macStr), "%02X:%02X:%02X:%02X:%02X:%02X",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    logMessage("DEBUG", String("RX ") + String(len) + "B from " + String(macStr));
+    
     String message = String((char*)data, len);
+    logMessage("DEBUG", String("RX data: ") + message);
+    
     // remember coordinator mac if unknown
     if (mac && (coordinatorMac[0] == 0 && coordinatorMac[1] == 0 && coordinatorMac[2] == 0 && coordinatorMac[3] == 0 && coordinatorMac[4] == 0 && coordinatorMac[5] == 0)) {
         memcpy(coordinatorMac, mac, 6);
+        logMessage("INFO", String("Learned coordinator MAC: ") + String(macStr));
     }
     // mark RX window
     lastRxWindow = millis();
@@ -547,10 +615,8 @@ void SmartTileNode::processReceivedMessage(const String& json) {
             config.setInt(ConfigKeys::RX_WINDOW_MS, accept->cfg.rx_window_ms);
             config.setInt(ConfigKeys::RX_PERIOD_MS, accept->cfg.rx_period_ms);
 
-            // Configure encrypted peer using LMK
-            if (!ensureEncryptedPeer(coordinatorMac, accept->lmk)) {
-                logMessage("ERROR", "Failed to configure encrypted peer");
-            }
+            // Configure peer (unencrypted in ESPNowW path; lmk may be empty)
+            ensureEncryptedPeer(coordinatorMac, accept->lmk);
             
             saveConfiguration();
             
@@ -695,31 +761,54 @@ String SmartTileNode::getMacAddress() {
 
 bool SmartTileNode::sendMessage(const EspNowMessage& message, const uint8_t* destMac) {
     String json = message.toJson();
+    
+    // ✓ Checklist: Message Size - Check before sending
+    if (json.length() > 250) {
+        logMessage("ERROR", String("Message too large: ") + String(json.length()) + " bytes");
+        return false;
+    }
+    
     const uint8_t* target = destMac;
-    uint8_t broadcast[6] = {0};
+    uint8_t broadcast[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
     if (!target) {
         bool known = false;
         for (int i=0;i<6;i++) { if (coordinatorMac[i] != 0) { known = true; break; } }
         target = known ? coordinatorMac : broadcast;
     }
-    esp_err_t res = esp_now_send(target, (const uint8_t*)json.c_str(), json.length());
-    return res == ESP_OK;
+    
+    // ✓ Checklist: Use native ESP-NOW v2 API
+    esp_err_t res = esp_now_send(target, (uint8_t*)json.c_str(), json.length());
+    if (res != ESP_OK) {
+        logMessage("WARN", String("esp_now_send failed: ") + String((int)res));
+        return false;
+    }
+    return true;
 }
 
-bool SmartTileNode::ensureEncryptedPeer(const uint8_t mac[6], const String& lmkHex) {
+bool SmartTileNode::ensureEncryptedPeer(const uint8_t mac[6], const String& /*lmkHex*/) {
     if (!mac) return false;
-    // Remove existing peer if present
+    
+    // ✓ Checklist: Peer Registration - Use native ESP-NOW v2
+    // Remove old peer if exists
     esp_now_del_peer(mac);
-    uint8_t lmk[16] = {0};
-    if (!parseHex16(lmkHex, lmk)) return false;
-    // Set PMK as well (optional but recommended)
-    esp_now_set_pmk(lmk);
-    esp_now_peer_info_t peer{};
-    memcpy(peer.peer_addr, mac, 6);
-    peer.channel = 0; // current channel
-    peer.encrypt = true;
-    memcpy(peer.lmk, lmk, 16);
-    return esp_now_add_peer(&peer) == ESP_OK;
+    
+    // Add as unencrypted peer
+    esp_now_peer_info_t peerInfo = {};
+    memcpy(peerInfo.peer_addr, mac, 6);
+    peerInfo.channel = 1;
+    peerInfo.encrypt = false;
+    peerInfo.ifidx = WIFI_IF_STA;
+    
+    esp_err_t res = esp_now_add_peer(&peerInfo);
+    if (res == ESP_OK || res == ESP_ERR_ESPNOW_EXIST) {
+        char macStr[18];
+        snprintf(macStr, sizeof(macStr), "%02X:%02X:%02X:%02X:%02X:%02X",
+                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+        logMessage("INFO", String("Peer registered: ") + String(macStr));
+        return true;
+    }
+    logMessage("ERROR", String("Failed to add peer: ") + String((int)res));
+    return false;
 }
 
 bool SmartTileNode::parseHex16(const String& hex, uint8_t out[16]) {
@@ -775,9 +864,11 @@ void loop() {
     node.loop();
 }
 
-// Static trampolines for ESP-NOW callbacks (placed after class definition)
-static void espnowRecv(const uint8_t* mac, const uint8_t* data, int len) {
-    if (gNodeInstance) gNodeInstance->onDataRecv(mac, data, len);
+// Static trampolines for ESP-NOW v2 callbacks
+static void espnowRecv(const esp_now_recv_info_t* recv_info, const uint8_t* data, int len) {
+    if (gNodeInstance && recv_info && recv_info->src_addr) {
+        gNodeInstance->onDataRecv(recv_info->src_addr, data, len);
+    }
 }
 static void espnowSent(const uint8_t* mac, esp_now_send_status_t status) {
     if (gNodeInstance) gNodeInstance->onDataSent(mac, status);

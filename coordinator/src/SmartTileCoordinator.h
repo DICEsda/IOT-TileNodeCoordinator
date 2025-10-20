@@ -16,6 +16,7 @@ public:
 	~SmartTileCoordinator();
 	bool begin();
 	void loop();
+	void setup();
 
 private:
 	EspNowManager* espNow;

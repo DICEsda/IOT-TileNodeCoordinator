@@ -129,11 +129,17 @@ void ZoneControl::updateLightState(const String& lightId, bool active) {
 void ZoneControl::loadFromStorage() {
     Preferences prefs;
     if (!prefs.begin("zones", true)) {
-        Logger::warn("Failed to load zone data (NVS not initialized yet - this is normal on first boot)");
+        Logger::info("No saved zone data found (this is normal on first boot or after flash erase)");
         return;
     }
     
     size_t zoneCount = prefs.getUInt("count", 0);
+    if (zoneCount == 0) {
+        Logger::info("No zones configured yet");
+        prefs.end();
+        return;
+    }
+    
     for (size_t i = 0; i < zoneCount; i++) {
         String zoneKey = "z" + String(i);
         String zoneId = prefs.getString((zoneKey + "_id").c_str());
@@ -151,12 +157,13 @@ void ZoneControl::loadFromStorage() {
     }
     
     prefs.end();
+    Logger::info("Loaded %d zones from storage", zoneCount);
 }
 
 void ZoneControl::saveToStorage() {
     Preferences prefs;
     if (!prefs.begin("zones", false)) {
-        Logger::error("Failed to save zone data");
+        Logger::error("Failed to save zone data - NVS may not be available");
         return;
     }
     
@@ -179,4 +186,5 @@ void ZoneControl::saveToStorage() {
     }
     
     prefs.end();
+    Logger::debug("Saved %d zones to storage", zoneIndex);
 }

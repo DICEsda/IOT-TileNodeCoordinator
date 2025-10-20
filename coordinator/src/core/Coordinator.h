@@ -33,4 +33,5 @@ private:
     void onMmWaveEvent(const MmWaveEvent& event);
     void onThermalEvent(const String& nodeId, const NodeThermalData& data);
     void onButtonEvent(const String& buttonId, bool pressed);
+    void handleNodeMessage(const String& nodeId, const uint8_t* data, size_t len);
 };

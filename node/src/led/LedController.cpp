@@ -120,6 +120,10 @@ void LedController::setStatus(StatusMode mode) {
 
 void LedController::runStatusAnimation() {
     uint32_t now = millis();
+    // Throttle updates to ~120 FPS to improve smoothness while avoiding overdraw
+    if (now - lastAnimMs < 8) {
+        return;
+    }
     switch (status) {
         case StatusMode::Pairing: {
             // Synchronized "heartbeat" double-pulse in blue with a longer delay
@@ -187,4 +191,5 @@ void LedController::runStatusAnimation() {
         default:
             break;
     }
+    lastAnimMs = now;
 }

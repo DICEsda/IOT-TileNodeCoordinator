@@ -2,20 +2,20 @@
 
 #include <Arduino.h>
 
-// ESP32-S3-DevKitC-1-N8 Pin Configuration
+// ESP32-S3-DevKitC-1 Pin Configuration
 namespace Pins {
     // UART for mmWave Sensor
-    constexpr uint8_t MMWAVE_RX = 18;    // UART1 RX
-    constexpr uint8_t MMWAVE_TX = 17;    // UART1 TX
+    constexpr uint8_t MMWAVE_RX = 18;    // UART1 RX (was 18 on both)
+    constexpr uint8_t MMWAVE_TX = 17;    // UART1 TX (S3 uses GPIO17)
     
     // Status LEDs (external SK6812B addressable strip)
-    constexpr uint8_t STATUS_LED = 15;   // Data pin for SK6812B strip (changed to GPIO15)
-    constexpr uint8_t STATUS_R = 0;     // Unused for addressable strip
+    constexpr uint8_t STATUS_LED = 15;   // Data pin for SK6812B strip on GPIO15
+    constexpr uint8_t STATUS_R = 0;      // Unused for addressable strip
     constexpr uint8_t STATUS_G = 0;
     constexpr uint8_t STATUS_B = 0;
     
     // Button Input (external physical button labeled "node button")
-    constexpr uint8_t PAIRING_BUTTON = 42;    // External button connected to GPIO42
+    constexpr uint8_t PAIRING_BUTTON = 42;    // External button connected to GPIO0 (BOOT button)
     
     // Optional External Sensors
     namespace External {

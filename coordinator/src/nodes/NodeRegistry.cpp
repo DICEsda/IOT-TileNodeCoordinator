@@ -4,7 +4,8 @@
 const char* NodeRegistry::STORAGE_NAMESPACE = "nodes";
 
 NodeRegistry::NodeRegistry()
-    : pairingActive(false)
+    : prefsInitialized(false)
+    , pairingActive(false)
     , pairingEndTime(0) {
 }
 
@@ -13,9 +14,11 @@ NodeRegistry::~NodeRegistry() {
 }
 
 bool NodeRegistry::begin() {
-    if (!prefs.begin(STORAGE_NAMESPACE, false)) {
-        Logger::error("Failed to initialize node storage");
-        return false;
+    prefsInitialized = prefs.begin(STORAGE_NAMESPACE, false);
+    if (!prefsInitialized) {
+        Logger::info("No saved node data found - starting with empty registry");
+        Logger::info("(This is normal on first boot or after flash erase)");
+        return true; // Continue anyway, just without persistence
     }
     
     loadFromStorage();
@@ -106,9 +109,10 @@ bool NodeRegistry::processPairingRequest(const uint8_t* mac, const String& nodeI
         Logger::warning("Rejected pairing request from %s: pairing not active", nodeId.c_str());
         return false;
     }
-    
-    // Generate a light ID based on the node ID
-    String lightId = "L" + nodeId.substring(1); // Convert "N123" to "L123"
+    // Generate a stable light ID from MAC last 3 bytes
+    char lightIdBuf[16];
+    snprintf(lightIdBuf, sizeof(lightIdBuf), "L%02X%02X%02X", mac[3], mac[4], mac[5]);
+    String lightId(lightIdBuf);
     
     if (registerNode(nodeId, lightId)) {
         pairingActive = false; // Close window after successful pairing
@@ -179,6 +183,9 @@ void NodeRegistry::loadFromStorage() {
 }
 
 void NodeRegistry::saveToStorage() {
+    if (!prefsInitialized) {
+        return; // Skip saving if preferences not available
+    }
     prefs.clear();
     prefs.putUInt("count", nodes.size());
     
@@ -194,9 +201,11 @@ void NodeRegistry::saveToStorage() {
 void NodeRegistry::cleanupStaleNodes() {
     uint32_t now = millis();
     std::vector<String> staleNodes;
+    staleNodes.reserve(4); // Pre-allocate for typical case
     
     for (const auto& pair : nodes) {
-        if (now - pair.second.lastSeenMs >= NODE_TIMEOUT_MS) {
+        // Skip nodes that have never been seen (lastSeenMs == 0)
+        if (pair.second.lastSeenMs > 0 && now - pair.second.lastSeenMs >= NODE_TIMEOUT_MS) {
             staleNodes.push_back(pair.first);
         }
     }

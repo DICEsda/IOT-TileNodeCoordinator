@@ -96,14 +96,15 @@ bool SetLightMessage::fromJson(const String& json) {
 	msg = doc["msg"].as<String>();
 	cmd_id = doc["cmd_id"].as<String>();
 	light_id = doc["light_id"].as<String>();
-	r = (uint8_t)(doc["r"].as<uint8_t>() || 0);
-	g = (uint8_t)(doc["g"].as<uint8_t>() || 0);
-	b = (uint8_t)(doc["b"].as<uint8_t>() || 0);
-	w = (uint8_t)(doc["w"].as<uint8_t>() || 0);
-	value = (uint8_t)(doc["value"].as<uint8_t>() || 0);
-	fade_ms = (uint16_t)(doc["fade_ms"].as<uint16_t>() | 0);
-	override_status = doc["override_status"].as<bool>();
-	ttl_ms = (uint16_t)(doc["ttl_ms"].as<uint16_t>() | 1500);
+	// Fix: Use ternary operator or explicit checks instead of logical OR for default values
+	r = doc.containsKey("r") ? doc["r"].as<uint8_t>() : 0;
+	g = doc.containsKey("g") ? doc["g"].as<uint8_t>() : 0;
+	b = doc.containsKey("b") ? doc["b"].as<uint8_t>() : 0;
+	w = doc.containsKey("w") ? doc["w"].as<uint8_t>() : 0;
+	value = doc.containsKey("value") ? doc["value"].as<uint8_t>() : 0;
+	fade_ms = doc.containsKey("fade_ms") ? doc["fade_ms"].as<uint16_t>() : 0;
+	override_status = doc["override_status"] | false;
+	ttl_ms = doc.containsKey("ttl_ms") ? doc["ttl_ms"].as<uint16_t>() : 1500;
 	reason = doc["reason"].as<String>();
 	return true;
 }
@@ -138,14 +139,15 @@ bool NodeStatusMessage::fromJson(const String& json) {
 	msg = doc["msg"].as<String>();
 	node_id = doc["node_id"].as<String>();
 	light_id = doc["light_id"].as<String>();
-	avg_r = (uint8_t)(doc["avg_r"].as<uint8_t>() | 0);
-	avg_g = (uint8_t)(doc["avg_g"].as<uint8_t>() | 0);
-	avg_b = (uint8_t)(doc["avg_b"].as<uint8_t>() | 0);
-	avg_w = (uint8_t)(doc["avg_w"].as<uint8_t>() | 0);
+	// Fix: Use proper default value checks
+	avg_r = doc.containsKey("avg_r") ? doc["avg_r"].as<uint8_t>() : 0;
+	avg_g = doc.containsKey("avg_g") ? doc["avg_g"].as<uint8_t>() : 0;
+	avg_b = doc.containsKey("avg_b") ? doc["avg_b"].as<uint8_t>() : 0;
+	avg_w = doc.containsKey("avg_w") ? doc["avg_w"].as<uint8_t>() : 0;
 	status_mode = doc["status_mode"].as<String>();
-	vbat_mv = (uint16_t)(doc["vbat_mv"].as<uint16_t>() | 0);
+	vbat_mv = doc.containsKey("vbat_mv") ? doc["vbat_mv"].as<uint16_t>() : 0;
 	fw = doc["fw"].as<String>();
-	ts = doc["ts"].as<uint32_t>() | millis();
+	ts = doc.containsKey("ts") ? doc["ts"].as<uint32_t>() : millis();
 	return true;
 }
 

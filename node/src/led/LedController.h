@@ -21,6 +21,7 @@ public:
     // Status patterns per PRD v0.5 (pairing/ota/error/operational idle)
     enum class StatusMode { None, Pairing, OTA, Error, Idle };
     void setStatus(StatusMode mode);
+    bool isAnimating() const { return status != StatusMode::None; }
 
 private:
     Adafruit_NeoPixel strip;
