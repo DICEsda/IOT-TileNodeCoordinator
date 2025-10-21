@@ -71,8 +71,23 @@ bool EspNow::begin() {
     // ✓ Checklist: Wi-Fi Mode - Set to STA only, disable SoftAP
     Logger::info("✓ [1/9] Setting WiFi mode to STA only...");
     WiFi.mode(WIFI_STA);
-    WiFi.disconnect(); // Ensure not connected to any AP
+    // Only disconnect if actually connected to avoid warning spam
+    if (WiFi.status() == WL_CONNECTED) {
+        WiFi.disconnect();
+    }
     delay(100);
+
+    // Pre-set channel BEFORE esp_now_init for maximum compatibility
+    esp_wifi_set_promiscuous(true);
+    esp_wifi_set_channel(1, WIFI_SECOND_CHAN_NONE);
+    esp_wifi_set_promiscuous(false);
+
+    // Optionally set a conservative ESPNOW PHY rate (if available)
+    #ifdef CONFIG_IDF_TARGET_ESP32S3
+    #ifdef WIFI_PHY_RATE_1M_L
+    esp_wifi_config_espnow_rate(WIFI_IF_STA, WIFI_PHY_RATE_1M_L);
+    #endif
+    #endif
     
     if (WiFi.getMode() != WIFI_STA) {
         Logger::error("✗ WiFi mode is not STA! Current mode: %d", WiFi.getMode());
@@ -106,6 +121,15 @@ bool EspNow::begin() {
         return false;
     }
     Logger::info("  ✓ ESP-NOW v2.0 initialized successfully");
+
+    // Set a PMK (even if we use unencrypted peers) to improve compatibility on some stacks
+    static const uint8_t PMK[16] = {'S','M','A','R','T','T','I','L','E','_','P','M','K','_','0','1'};
+    esp_err_t pmkRes = esp_now_set_pmk(PMK);
+    if (pmkRes == ESP_OK) {
+        Logger::info("  ✓ PMK set");
+    } else {
+        Logger::warn("  PMK set failed: %d", (int)pmkRes);
+    }
     
     // Set WiFi channel - both devices must use same channel
     Logger::info("✓ [7/9] Setting WiFi channel to 1...");
@@ -214,7 +238,18 @@ void EspNow::loop() {
         Logger::debug("ESP-NOW: Loop running, pairing=%d", isPairingEnabled());
         lastDebugLog = millis();
     }
-    
+
+    // While pairing, broadcast a small beacon to trigger nodes to send JOIN immediately
+    if (isPairingEnabled()) {
+        static uint32_t lastBeacon = 0;
+        if (millis() - lastBeacon > 2000) {
+            uint8_t bcast[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
+            const char* ping = "{\"msg\":\"pairing_ping\"}";
+            esp_now_send(bcast, (const uint8_t*)ping, strlen(ping));
+            lastBeacon = millis();
+        }
+    }
+
     // Check pairing timeout
     if (pairingEnabled && millis() > pairingEndTime) {
         pairingEnabled = false;
@@ -330,6 +365,23 @@ void EspNow::processReceivedData(const uint8_t* mac, const uint8_t* data, int le
             addPeer(mac);
         } else {
             Logger::warn("JOIN_REQUEST received but pairing is NOT enabled - press button to enable pairing");
+        }
+        return;
+    }
+
+    // Handle JOIN_REQUEST explicitly to open pairing path even if window not active
+    if (mt == MessageType::JOIN_REQUEST) {
+        Logger::info("JOIN_REQUEST received from %s", macStr);
+        // If pairing not active, log and ignore; otherwise route to pairingCallback
+        if (isPairingEnabled()) {
+            addPeer(mac); // ensure we can unicast JOIN_ACCEPT
+            if (pairingCallback) {
+                pairingCallback(mac, data, (size_t)len);
+            } else {
+                Logger::error("Pairing active but no pairingCallback registered");
+            }
+        } else {
+            Logger::warn("JOIN_REQUEST ignored (pairing not active)");
         }
         return;
     }

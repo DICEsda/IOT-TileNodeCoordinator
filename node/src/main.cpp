@@ -270,6 +270,7 @@ public:
     void onDataRecv(const uint8_t* mac, const uint8_t* data, int len);
     void onDataSent(const uint8_t* mac, esp_now_send_status_t status);
 private:
+    void sendJoinRequestNow();
     bool sendMessage(const EspNowMessage& message, const uint8_t* destMac = nullptr);
     void processReceivedMessage(const String& json);
     bool ensureEncryptedPeer(const uint8_t mac[6], const String& lmkHex);
@@ -360,6 +361,8 @@ bool SmartTileNode::begin() {
         currentState = NodeState::PAIRING;
         leds.setStatus(LedController::StatusMode::Pairing);
         logMessage("INFO", "Starting in PAIRING mode");
+        // AUTO-PAIR: Immediately open pairing on first boot/unpaired state
+        startPairing();
     }
     
     return true;
@@ -403,6 +406,26 @@ void SmartTileNode::loop() {
     delay(animating ? 1 : 10);
 }
 
+void SmartTileNode::sendJoinRequestNow() {
+    JoinRequestMessage joinReq;
+    joinReq.mac = getMacAddress();
+    joinReq.fw = firmwareVersion;
+    joinReq.caps.rgbw = true;
+    joinReq.caps.led_count = leds.numPixels();
+    joinReq.caps.temp_spi = false;
+    joinReq.caps.deep_sleep = true;
+    joinReq.token = String(esp_random(), HEX);
+
+    String payload = joinReq.toJson();
+    if (payload.length() > 250) {
+        logMessage("ERROR", "JOIN_REQUEST too large!");
+        return;
+    }
+    // Always broadcast for pairing
+    uint8_t targetMac[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
+    esp_now_send(targetMac, (uint8_t*)payload.c_str(), payload.length());
+}
+
 void SmartTileNode::handlePairing() {
     if (!inPairingMode) {
         // Wait for button press to start pairing
@@ -435,9 +458,19 @@ void SmartTileNode::handlePairing() {
             return;
         }
         
-        // Send to broadcast MAC address using native ESP-NOW v2
-        uint8_t broadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-        esp_err_t result = esp_now_send(broadcastMac, (uint8_t*)payload.c_str(), payload.length());
+        // Always broadcast JOIN_REQUEST for maximum reliability; unicast will be used after pairing
+        uint8_t targetMac[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
+        esp_err_t result = esp_now_send(targetMac, (uint8_t*)payload.c_str(), payload.length());
+        if (result != ESP_OK) {
+            // Retry once after re-adding broadcast peer
+            esp_now_peer_info_t peerInfo = {};
+            memcpy(peerInfo.peer_addr, targetMac, 6);
+            peerInfo.channel = 1;
+            peerInfo.encrypt = false;
+            peerInfo.ifidx = WIFI_IF_STA;
+            esp_now_add_peer(&peerInfo);
+            result = esp_now_send(targetMac, (uint8_t*)payload.c_str(), payload.length());
+        }
         
         lastJoinRequest = millis();
         logMessage("DEBUG", String("Sent JOIN_REQUEST (") + String(payload.length()) + 
@@ -474,6 +507,18 @@ bool SmartTileNode::initEspNow() {
     WiFi.setSleep(false);
     WiFi.disconnect();
     delay(100);
+
+    // Pre-set channel BEFORE esp_now_init for maximum compatibility
+    esp_wifi_set_promiscuous(true);
+    esp_wifi_set_channel(1, WIFI_SECOND_CHAN_NONE);
+    esp_wifi_set_promiscuous(false);
+
+    // Optionally set a conservative ESPNOW PHY rate (if available)
+    #ifdef CONFIG_IDF_TARGET_ESP32C3
+    #ifdef WIFI_PHY_RATE_1M_L
+    esp_wifi_config_espnow_rate(WIFI_IF_STA, WIFI_PHY_RATE_1M_L);
+    #endif
+    #endif
     
     if (WiFi.getMode() != WIFI_STA) {
         logMessage("ERROR", "WiFi mode is not STA!");
@@ -497,6 +542,15 @@ bool SmartTileNode::initEspNow() {
         return false;
     }
     logMessage("INFO", "  ESP-NOW v2.0 initialized");
+
+    // Set PMK to ensure interoperability (even with unencrypted peers)
+    static const uint8_t PMK[16] = {'S','M','A','R','T','T','I','L','E','_','P','M','K','_','0','1'};
+    esp_err_t pmkRes = esp_now_set_pmk(PMK);
+    if (pmkRes == ESP_OK) {
+        logMessage("INFO", "  PMK set");
+    } else {
+        logMessage("WARN", String("  PMK set failed: ") + String((int)pmkRes));
+    }
     
     // Set WiFi channel to 1 (must match coordinator)
     logMessage("INFO", "[4/9] Setting WiFi channel to 1...");
@@ -583,6 +637,11 @@ void SmartTileNode::onDataRecv(const uint8_t* mac, const uint8_t* data, int len)
     }
     // mark RX window
     lastRxWindow = millis();
+    // If in pairing mode, immediately send a JOIN_REQUEST when any frame arrives
+    if (inPairingMode) {
+        logMessage("INFO", "Pairing signal received - sending JOIN_REQUEST now");
+        sendJoinRequestNow();
+    }
     processReceivedMessage(message);
 }
 

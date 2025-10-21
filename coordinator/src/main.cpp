@@ -20,6 +20,7 @@ void setup() {
     
     // Initialize Logger BEFORE anything else
     Serial.println("Initializing Logger...");
+    Serial.flush();
     Logger::begin(115200);
     Logger::info("*** BOOT START ***");
     Serial.flush();
@@ -60,10 +61,11 @@ void setup() {
     
     Logger::info("*** SETUP START ***");
     Serial.println("Starting Coordinator...");
-    
     Serial.flush();
     
-    bool success = coordinator.begin();
+    
+    bool success = false;
+    success = coordinator.begin();
     if (!success) {
         Logger::error("*** COORDINATOR INITIALIZATION FAILED ***");
         Serial.println("\n*** COORDINATOR INITIALIZATION FAILED ***");

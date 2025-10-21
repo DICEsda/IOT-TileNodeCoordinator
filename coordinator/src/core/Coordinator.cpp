@@ -85,7 +85,7 @@ bool Coordinator::begin() {
             return;
         }
 
-        // Add as ESP-NOW peer via ESPNowW (unencrypted)
+        // Add as ESP-NOW peer (unencrypted)
         if (!espNow->addPeer(mac)) {
             Logger::error("Failed to add ESP-NOW peer for %s", macStr);
         }
@@ -93,7 +93,9 @@ bool Coordinator::begin() {
         JoinAcceptMessage accept;
         accept.node_id = nodeId;
         accept.light_id = nodes->getLightForNode(nodeId);
-        accept.lmk = ""; // Using unencrypted ESP-NOW in ESPNowW path
+        accept.lmk = ""; // Unencrypted for now
+        accept.cfg.rx_window_ms = 20;
+        accept.cfg.rx_period_ms = 100;
         String json = accept.toJson();
 
         // send back to node mac
