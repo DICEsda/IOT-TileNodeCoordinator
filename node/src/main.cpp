@@ -225,7 +225,8 @@ private:
     bool statusOverrideActive = false;
     uint32_t statusOverrideUntilMs = 0;
     
-    // Temperature removed; coordinator owns sensors and derating
+    // Link/activity tracking
+    uint32_t lastLinkActivityMs = 0; // updated on any RX, or successful unicast TX
     
     // Power management
     uint32_t lastRxWindow;
@@ -238,6 +239,7 @@ private:
     ButtonInput button;
     uint32_t pairingStartTime;
     bool inPairingMode;
+    uint32_t lastJoinSentMs;
     
     // Node info
     String nodeId;
@@ -279,8 +281,6 @@ private:
     // LED control
     void applyColor(uint8_t r, uint8_t g, uint8_t b, uint8_t w, uint16_t fadeMs);
     
-    // Temperature sensing removed
-    
     // Power management
     void enterLightSleep();
     bool isRxWindowActive();
@@ -302,6 +302,10 @@ private:
     String generateCmdId();
     String getMacAddress();
     void logMessage(const String& level, const String& message);
+
+    // Link helpers
+    bool isBroadcast(const uint8_t* mac) const;
+    bool isLinkAlive() const;
 };
 
 SmartTileNode::SmartTileNode() 
@@ -315,6 +319,7 @@ SmartTileNode::SmartTileNode()
     , telemetryInterval(30)
     , pairingStartTime(0)
     , inPairingMode(false)
+    , lastJoinSentMs(0)
     , firmwareVersion("c3-1.0.0")
     , lastCommandTime(0) {
 }
@@ -356,14 +361,15 @@ bool SmartTileNode::begin() {
     if (config.exists(ConfigKeys::NODE_ID) && config.exists(ConfigKeys::LIGHT_ID)) {
         currentState = NodeState::OPERATIONAL;
         leds.setStatus(LedController::StatusMode::Idle);
-        logMessage("INFO", "Starting in OPERATIONAL mode");
+        Serial.println("Node: OPERATIONAL (awaiting link)");
     } else {
         currentState = NodeState::PAIRING;
-        leds.setStatus(LedController::StatusMode::Pairing);
-        logMessage("INFO", "Starting in PAIRING mode");
-        // AUTO-PAIR: Immediately open pairing on first boot/unpaired state
-        startPairing();
+        leds.setStatus(LedController::StatusMode::Idle);
+        Serial.println("Node: unpaired. Hold button to enter pairing.");
     }
+    
+    // Force periodic telemetry every 5 seconds per requirement
+    telemetryInterval = 5;
     
     return true;
 }
@@ -388,6 +394,12 @@ void SmartTileNode::loop() {
             break;
     }
     
+    // While operational and not overriding/pairing, reflect link health on LEDs
+    if (currentState == NodeState::OPERATIONAL && !inPairingMode && !statusOverrideActive) {
+        leds.setStatus(isLinkAlive() ? LedController::StatusMode::Connected
+                                     : LedController::StatusMode::Idle);
+    }
+
     // Send telemetry periodically
     if (millis() - lastTelemetry > telemetryInterval * 1000) {
         sendTelemetry();
@@ -433,14 +445,17 @@ void SmartTileNode::handlePairing() {
     }
     
     // Check if pairing window expired
-    if (millis() - pairingStartTime > config.getInt(ConfigKeys::PAIRING_WINDOW_S, 120) * 1000) {
+    uint32_t now = millis();
+    if (now - pairingStartTime > (uint32_t)config.getInt(ConfigKeys::PAIRING_WINDOW_S, 120) * 1000U) {
         stopPairing();
         return;
     }
     
-    // Send join request periodically during pairing
-    static uint32_t lastJoinRequest = 0;
-    if (millis() - lastJoinRequest > 5000) { // Every 5 seconds
+    // Adaptive join interval with jitter (faster first 15s)
+    uint32_t elapsed = now - pairingStartTime;
+    uint32_t baseInterval = (elapsed < 15000U) ? 1500U : 5000U;
+    uint32_t jitter = (uint32_t)(esp_random() % 300U);
+    if (now - lastJoinSentMs >= baseInterval + jitter) {
         JoinRequestMessage joinReq;
         joinReq.mac = getMacAddress();
         joinReq.fw = firmwareVersion;
@@ -472,7 +487,7 @@ void SmartTileNode::handlePairing() {
             result = esp_now_send(targetMac, (uint8_t*)payload.c_str(), payload.length());
         }
         
-        lastJoinRequest = millis();
+        lastJoinSentMs = millis();
         logMessage("DEBUG", String("Sent JOIN_REQUEST (") + String(payload.length()) + 
                    " bytes), result=" + String((int)result));
     }
@@ -621,39 +636,58 @@ bool SmartTileNode::initEspNow() {
 }
 
 void SmartTileNode::onDataRecv(const uint8_t* mac, const uint8_t* data, int len) {
-    // Log every received message for debugging
     char macStr[18];
     snprintf(macStr, sizeof(macStr), "%02X:%02X:%02X:%02X:%02X:%02X",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-    logMessage("DEBUG", String("RX ") + String(len) + "B from " + String(macStr));
     
     String message = String((char*)data, len);
-    logMessage("DEBUG", String("RX data: ") + message);
     
-    // remember coordinator mac if unknown
-    if (mac && (coordinatorMac[0] == 0 && coordinatorMac[1] == 0 && coordinatorMac[2] == 0 && coordinatorMac[3] == 0 && coordinatorMac[4] == 0 && coordinatorMac[5] == 0)) {
+    // Ignore coordinator pairing pings (don't mark link alive)
+    if (message.indexOf("\"pairing_ping\"") >= 0) {
+        // Only respond if actively pairing
+        if (inPairingMode) {
+            uint32_t now = millis();
+            if (now - lastJoinSentMs > 800U) {
+                Serial.println("RX pairing signal -> sending JOIN_REQUEST");
+                sendJoinRequestNow();
+                lastJoinSentMs = now;
+            }
+        }
+        return; // don't process further
+    }
+    
+    // Remember coordinator MAC only upon join_accept
+    if (message.indexOf("\"join_accept\"") >= 0) {
         memcpy(coordinatorMac, mac, 6);
-        logMessage("INFO", String("Learned coordinator MAC: ") + String(macStr));
+        Serial.printf("Coordinator MAC: %s\n", macStr);
     }
-    // mark RX window
+    
+    // mark RX window and link activity (only for real messages, not pings)
     lastRxWindow = millis();
-    // If in pairing mode, immediately send a JOIN_REQUEST when any frame arrives
-    if (inPairingMode) {
-        logMessage("INFO", "Pairing signal received - sending JOIN_REQUEST now");
-        sendJoinRequestNow();
-    }
+    lastLinkActivityMs = lastRxWindow;
+    
     processReceivedMessage(message);
 }
 
 void SmartTileNode::onDataSent(const uint8_t* mac, esp_now_send_status_t status) {
     if (status == ESP_NOW_SEND_SUCCESS) {
-        logMessage("DEBUG", "Message sent successfully");
-    } else {
-        logMessage("WARN", "Message send failed");
+        // Consider link alive only for unicast (non-broadcast) sends
+        if (mac && !isBroadcast(mac)) {
+            lastLinkActivityMs = millis();
+        }
+    }
+    // After a send completes, if not in pairing/override, reflect link health
+    if (currentState == NodeState::OPERATIONAL && !inPairingMode && !statusOverrideActive) {
+        leds.setStatus(isLinkAlive() ? LedController::StatusMode::Connected
+                                     : LedController::StatusMode::Idle);
     }
 }
 
 void SmartTileNode::processReceivedMessage(const String& json) {
+    // Ignore coordinator pairing pings and test beacons without logging warnings
+    if (json.indexOf("\"pairing_ping\"") >= 0 || json.indexOf("coordinator_alive") >= 0) {
+        return;
+    }
     EspNowMessage* message = MessageFactory::createMessage(json);
     if (!message) {
         logMessage("ERROR", "Failed to parse message");
@@ -679,13 +713,21 @@ void SmartTileNode::processReceivedMessage(const String& json) {
             
             saveConfiguration();
             
-            // Send status and switch to operational
-            sendTelemetry();
+            // Send status and switch to connected operational mode
             currentState = NodeState::OPERATIONAL;
             stopPairing();
-            leds.setStatus(LedController::StatusMode::Idle);
+            // Brief green flash to confirm pairing success (full brightness)
+            leds.setStatus(LedController::StatusMode::None);
+            leds.setBrightness(255);
+            leds.setColor(0, 255, 0, 0);
+            delay(120);
+            // Resume Connected animation
+            leds.setStatus(LedController::StatusMode::Connected);
             
-            logMessage("INFO", "Successfully paired with coordinator");
+            // Immediately send telemetry after pairing
+            sendTelemetry();
+            
+            Serial.println("Paired successfully!");
             break;
         }
         case MessageType::SET_LIGHT: {
@@ -712,7 +754,6 @@ void SmartTileNode::processReceivedMessage(const String& json) {
                 ack.cmd_id = setLight->cmd_id;
                 sendMessage(ack);
                 
-                logMessage("INFO", "Received set_light command");
             }
             break;
         }
@@ -746,13 +787,24 @@ bool SmartTileNode::isRxWindowActive() {
     return (millis() - lastRxWindow) < rxWindowMs;
 }
 
+bool SmartTileNode::isBroadcast(const uint8_t* mac) const {
+    if (!mac) return true;
+    for (int i = 0; i < 6; ++i) if (mac[i] != 0xFF) return false;
+    return true;
+}
+
+bool SmartTileNode::isLinkAlive() const {
+    if (lastLinkActivityMs == 0) return false;
+    return (millis() - lastLinkActivityMs) < 10000U; // 10s window
+}
+
 void SmartTileNode::handleButton() {
     button.loop();
     // Clear status override when TTL expires
     if (statusOverrideActive && millis() > statusOverrideUntilMs) {
         statusOverrideActive = false;
         leds.setStatus(currentState == NodeState::PAIRING ? LedController::StatusMode::Pairing
-                                                          : LedController::StatusMode::Idle);
+                                                          : LedController::StatusMode::Connected);
     }
 }
 
@@ -760,13 +812,14 @@ void SmartTileNode::startPairing() {
     inPairingMode = true;
     pairingStartTime = millis();
     leds.setStatus(LedController::StatusMode::Pairing);
-    logMessage("INFO", "Pairing mode started");
+    Serial.println("Pairing mode: active");
 }
 
 void SmartTileNode::stopPairing() {
     inPairingMode = false;
-    leds.setStatus(LedController::StatusMode::Idle);
-    logMessage("INFO", "Pairing mode stopped");
+    leds.setStatus(currentState == NodeState::OPERATIONAL ? LedController::StatusMode::Connected
+                                                          : LedController::StatusMode::Idle);
+    Serial.println("Pairing mode: stopped");
 }
 
 void SmartTileNode::sendTelemetry() {
@@ -778,6 +831,17 @@ void SmartTileNode::sendTelemetry() {
                         : (statusOverrideActive ? "override" : "operational");
     status.fw = firmwareVersion;
     status.vbat_mv = readBatteryVoltage();
+    
+    // Visual send indicator only when link is alive (avoid green when coordinator is off)
+    if (isLinkAlive()) {
+        leds.setStatus(LedController::StatusMode::None);
+        leds.setBrightness(255);
+        leds.setColor(0, 255, 0, 0);
+        delay(60);
+        if (currentState == NodeState::OPERATIONAL && !statusOverrideActive) {
+            leds.setStatus(LedController::StatusMode::Connected);
+        }
+    }
     
     sendMessage(status);
 }
@@ -893,8 +957,7 @@ bool SmartTileNode::parseHex16(const String& hex, uint8_t out[16]) {
 }
 
 void SmartTileNode::logMessage(const String& level, const String& message) {
-    uint32_t timestamp = millis();
-    Serial.printf("[%lu] [%s] %s\n", timestamp, level.c_str(), message.c_str());
+    Serial.printf("[%s] %s\n", level.c_str(), message.c_str());
 }
 
 // Global instance

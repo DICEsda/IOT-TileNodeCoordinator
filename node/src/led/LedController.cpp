@@ -114,8 +114,20 @@ void LedController::clear() {
 }
 
 void LedController::setStatus(StatusMode mode) {
+    if (status == mode) return; // avoid resetting animation every loop
     status = mode;
     lastAnimMs = 0; // reset animation timer
+}
+
+void LedController::startWave(uint16_t periodMs, uint32_t durationMs) {
+    // Use status Wave; pack timing into fadeStartTime/fadeDuration to reuse fields
+    fadeStartTime = millis();
+    fadeDuration = periodMs; // store period here
+    // targetBrightness holds remaining duration high byte? keep separate via currentColor as timestamp? Simplify: reuse targetBrightness as unused
+    // We'll compute relative time from fadeStartTime and use fadeDuration as period
+    setStatus(StatusMode::Wave);
+    // Use currentBrightness as a flag if needed (not required)
+    // duration is tracked via targetBrightness? Instead we will end wave after 4s externally by caller.
 }
 
 void LedController::runStatusAnimation() {
@@ -126,31 +138,18 @@ void LedController::runStatusAnimation() {
     }
     switch (status) {
         case StatusMode::Pairing: {
-            // Synchronized "heartbeat" double-pulse in blue with a longer delay
-            // Two quick pulses (lub-dub) then rest. Total cycle ~1600ms.
+            // Smooth blue breathing for pairing mode
             const uint32_t cycleMs = 1600;
-            uint32_t t = now % cycleMs;
-
-            // Gaussian-like pulses for smooth rise/fall
-            auto pulse = [](float x, float mu, float sigma) -> float {
-                float d = (x - mu) / sigma;
-                return expf(-0.5f * d * d); // 0..1
-            };
-
-            // Centers and widths (ms) for the two pulses
-            float a1 = pulse((float)t, 110.0f, 55.0f);   // first beat around 110ms
-            float a2 = pulse((float)t, 310.0f, 55.0f);   // second beat ~200ms later
-            float a = fminf(1.0f, a1 + a2);
-
-            // Map amplitude to brightness and blue intensity
-            uint8_t br = (uint8_t)(26 + a * 120.0f);     // brightness 26..146
-            int blue = (int)(70 + a * 185.0f);           // blue 70..255
-            if (blue > 255) blue = 255;
-
+            float phase = (float)(now % cycleMs) / (float)cycleMs; // 0..1
+            float breathe = 0.5f * (1.0f + sinf(2.0f * (float)M_PI * phase));
+            
+            uint8_t br = (uint8_t)(40 + breathe * 140.0f); // 40..180
+            uint8_t blue = (uint8_t)(80 + breathe * 175.0f); // 80..255
+            
             strip.setBrightness(br);
             uint16_t N = strip.numPixels();
             for (uint16_t i = 0; i < N; ++i) {
-                strip.setPixelColor(i, strip.Color(0, 0, (uint8_t)blue, 0));
+                strip.setPixelColor(i, strip.Color(0, 0, blue, 0));
             }
             strip.show();
             break;
@@ -179,11 +178,53 @@ void LedController::runStatusAnimation() {
             break;
         }
         case StatusMode::Idle: {
-            // Subtle warm white breathing on W channel (~3s period)
-            float breathe = 0.5f * (1.0f + sinf((2.0f * (float)M_PI) * (now % 3000) / 3000.0f));
-            uint8_t w = 24 + (uint8_t)(breathe * 32); // 24..56
-            strip.setBrightness(28 + (uint8_t)(breathe * 20)); // 28..48
-            for (uint16_t i = 0; i < strip.numPixels(); i++) strip.setPixelColor(i, strip.Color(0, 0, 0, w));
+            // Idle = off (avoid confusion when coordinator is off)
+            strip.clear();
+            strip.setBrightness(0);
+            strip.show();
+            break;
+        }
+        case StatusMode::Connected: {
+            // Professional green trailing wave for 4-LED SK6812B (idle connected)
+            uint16_t N = strip.numPixels();
+            if (N == 0) break;
+            
+            uint32_t cycleMs = 2000;
+            float phase = (float)(now % cycleMs) / (float)cycleMs; // 0..1
+            float pos = phase * (float)N; // float position 0..N
+            
+            strip.clear();
+            strip.setBrightness(140);
+            for (uint16_t i = 0; i < N; ++i) {
+                float dist = pos - (float)i;
+                if (dist < 0) dist += N;
+                uint8_t g = 0;
+                if (dist < 0.5f) g = 255;
+                else if (dist < 1.5f) g = (uint8_t)(120.0f * (1.0f - (dist - 0.5f)));
+                else if (dist < 2.5f) g = (uint8_t)(40.0f * (1.0f - (dist - 1.5f)));
+                if (g > 0) strip.setPixelColor(i, strip.Color(0, g, 0, 0));
+            }
+            strip.show();
+            break;
+        }
+        case StatusMode::Wave: {
+            // Coordinated test wave: sequential brightness wave across 4 LEDs
+            uint16_t N = strip.numPixels();
+            if (N == 0) break;
+            uint32_t period = fadeDuration > 0 ? fadeDuration : 1200;
+            float phase = (float)((now - fadeStartTime) % period) / (float)period; // 0..1
+            float pos = phase * (float)N;
+            strip.clear();
+            strip.setBrightness(200);
+            for (uint16_t i = 0; i < N; ++i) {
+                float dist = fabsf(pos - (float)i);
+                if (dist > N/2) dist = N - dist; // wrap minimal distance
+                uint8_t w = 0;
+                if (dist < 0.5f) w = 255;
+                else if (dist < 1.5f) w = (uint8_t)(150.0f * (1.0f - (dist - 0.5f)));
+                else if (dist < 2.5f) w = (uint8_t)(60.0f * (1.0f - (dist - 1.5f)));
+                if (w > 0) strip.setPixelColor(i, strip.Color(0, 0, 0, w)); // use white channel for clarity
+            }
             strip.show();
             break;
         }

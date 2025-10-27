@@ -38,7 +38,7 @@ namespace Pins {
     struct RgbLed {
         static constexpr uint8_t PIN = STATUS_LED; // NeoPixel data pin
         static constexpr uint8_t CHANNEL = 0;
-        static constexpr uint8_t NUM_PIXELS = 4;   // 4 SK6812B pixels
+        static constexpr uint8_t NUM_PIXELS = 16;  // 16 SK6812B pixels (4 pixels per node x 4 nodes)
     };
     
     // WiFi Status LED Control

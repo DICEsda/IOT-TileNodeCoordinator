@@ -16,7 +16,7 @@ public:
         return true;
     }
 
-    // Non-blocking pulse: set color for durationMs starting now
+    // Non-blocking pulse: set color for durationMs starting now (affects all pixels)
     void pulse(uint8_t r, uint8_t g, uint8_t b, uint32_t durationMs = 1000) {
         pulseEnd = millis() + durationMs;
         targetR = r; targetG = g; targetB = b;
@@ -37,17 +37,30 @@ public:
             uint8_t w = 25 + (uint8_t)(tri * 30); // ~10%-20%
             setAllWarmWhite(w);
         } else if (!active) {
-            // If neither breathing nor pulse, ensure off
-            // no-op to avoid flicker; state functions will set color
+            // If neither breathing nor pulse, defer to per-pixel state set by caller
+            // (no-op to avoid flicker)
         }
     }
 
+    // Set all pixels to RGB (no white)
     void setAll(uint8_t r, uint8_t g, uint8_t b) {
         for (uint8_t i = 0; i < strip.numPixels(); ++i) {
             strip.setPixelColor(i, strip.Color(r, g, b, 0));
         }
         strip.show();
     }
+
+    // Per-pixel control helpers
+    void clear() {
+        strip.clear();
+        strip.show();
+    }
+    void setPixel(uint8_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w = 0) {
+        if (index >= strip.numPixels()) return;
+        strip.setPixelColor(index, strip.Color(r, g, b, w));
+    }
+    void show() { strip.show(); }
+    uint8_t numPixels() const { return strip.numPixels(); }
 
     void setIdleBreathing(bool enable) {
         idleBreathing = enable;
@@ -63,6 +76,8 @@ public:
         }
         strip.show();
     }
+
+    bool isPulsing() const { return active; }
 
 private:
     Adafruit_NeoPixel strip;

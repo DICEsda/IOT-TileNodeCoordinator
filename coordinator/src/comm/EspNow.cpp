@@ -6,14 +6,17 @@
 #include "../nodes/NodeRegistry.h"
 #include "../utils/Logger.h"
 #include <Preferences.h>
+#include <map>
 
 // Simple singleton to bridge static callbacks
 static EspNow* s_self = nullptr;
+// Recently handled JOIN requests to avoid duplicate processing
+static std::map<String, uint32_t> s_recentJoin;
 
 // ✓ ESP-NOW v2.0 callback signatures (Checklist: ESP-NOW Version)
 // v2 uses esp_now_recv_info_t instead of passing MAC directly
 void staticRecvCallback(const esp_now_recv_info_t* recv_info, const uint8_t* data, int len) {
-    Logger::info("*** ESP-NOW V2 RX CALLBACK TRIGGERED ***");
+    // Reduce noise: only debug on RX callback
     if (s_self && recv_info && recv_info->src_addr) {
         s_self->handleEspNowReceive(recv_info->src_addr, data, len);
     } else {
@@ -29,8 +32,11 @@ void staticSendCallback(const uint8_t* mac, esp_now_send_status_t status) {
     char macStr[18];
     snprintf(macStr, sizeof(macStr), "%02X:%02X:%02X:%02X:%02X:%02X",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-    Logger::info("ESP-NOW V2: send_cb to %s status=%d (%s)", macStr, (int)status, 
-                 status == ESP_NOW_SEND_SUCCESS ? "SUCCESS" : "FAIL");
+    if (status == ESP_NOW_SEND_SUCCESS) {
+        Logger::debug("ESP-NOW V2: send_cb OK -> %s", macStr);
+    } else {
+        Logger::warn("ESP-NOW V2: send_cb to %s FAILED (status=%d)", macStr, (int)status);
+    }
 }
 
 // small helper to hex encode bytes
@@ -201,28 +207,6 @@ bool EspNow::begin() {
         }
     }
     
-    // ✓ Checklist: Testing - Send simple test message
-    Logger::info("===========================================");
-    Logger::info("TESTING: Sending test broadcast...");
-    uint8_t testBcast[6]; memset(testBcast, 0xFF, 6);
-    String testMsg = "{\"test\":\"coordinator_alive\"}";
-    
-    // ✓ Checklist: Message Size - Keep ≤ 250 bytes
-    if (testMsg.length() > 250) {
-        Logger::warn("Test message exceeds 250 bytes!");
-    } else {
-        Logger::info("  Message size: %d bytes (within 250 byte limit)", testMsg.length());
-    }
-    
-    esp_err_t testRes = esp_now_send(testBcast, (uint8_t*)testMsg.c_str(), testMsg.length());
-    if (testRes == ESP_OK) {
-        Logger::info("  ✓ Test broadcast queued successfully");
-    } else {
-        Logger::error("✗ Test broadcast failed, error=%d", testRes);
-    }
-    
-    delay(500);
-    
     Logger::info("===========================================");
     Logger::info("✓ ESP-NOW V2.0 READY - All checks passed!");
     Logger::info("✓ Coordinator listening for node messages");
@@ -242,7 +226,7 @@ void EspNow::loop() {
     // While pairing, broadcast a small beacon to trigger nodes to send JOIN immediately
     if (isPairingEnabled()) {
         static uint32_t lastBeacon = 0;
-        if (millis() - lastBeacon > 2000) {
+        if (millis() - lastBeacon > 1500) {
             uint8_t bcast[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
             const char* ping = "{\"msg\":\"pairing_ping\"}";
             esp_now_send(bcast, (const uint8_t*)ping, strlen(ping));
@@ -324,12 +308,11 @@ void EspNow::handleEspNowReceive(const uint8_t* mac, const uint8_t* data, int le
     snprintf(macStr, sizeof(macStr), "%02X:%02X:%02X:%02X:%02X:%02X",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     
-    // ✓ Checklist: Testing - Print received messages on serial
-    Logger::info("==> ESP-NOW V2 RECEIVED %dB from %s", len, macStr);
-    Logger::hexDump("ESP-NOW V2 RX", data, len, 64);
-    
+    // Reduce noise: compact RX logging at DEBUG level
+    Logger::debug("RX %dB from %s", len, macStr);
+
     String payload((const char*)data, len);
-    Logger::info("==> Payload: %s", payload.c_str());
+    Logger::debug("Payload: %s", payload.c_str());
     
     processReceivedData(mac, data, len);
 }
@@ -348,7 +331,7 @@ void EspNow::processReceivedData(const uint8_t* mac, const uint8_t* data, int le
     String payload((const char*)data, len);
     MessageType mt = MessageFactory::getMessageType(payload);
     
-    Logger::info("Processing message type=%d from %s", (int)mt, macStr);
+    Logger::debug("Processing message type=%d from %s", (int)mt, macStr);
 
     if (mt == MessageType::JOIN_REQUEST) {
         Logger::info("*** JOIN_REQUEST detected from %s ***", macStr);
@@ -372,7 +355,15 @@ void EspNow::processReceivedData(const uint8_t* mac, const uint8_t* data, int le
     // Handle JOIN_REQUEST explicitly to open pairing path even if window not active
     if (mt == MessageType::JOIN_REQUEST) {
         Logger::info("JOIN_REQUEST received from %s", macStr);
-        // If pairing not active, log and ignore; otherwise route to pairingCallback
+        // Deduplicate JOIN within 4s per MAC
+        uint32_t nowMs = millis();
+        auto it = s_recentJoin.find(String(macStr));
+        if (it != s_recentJoin.end() && (nowMs - it->second) < 4000U) {
+            Logger::debug("Duplicate JOIN_REQUEST ignored for %s", macStr);
+            return;
+        }
+        s_recentJoin[String(macStr)] = nowMs;
+
         if (isPairingEnabled()) {
             addPeer(mac); // ensure we can unicast JOIN_ACCEPT
             if (pairingCallback) {

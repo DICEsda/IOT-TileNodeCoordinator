@@ -18,10 +18,14 @@ public:
     uint16_t numPixels() const { return strip.numPixels(); }
     uint32_t getCurrentColor() const { return currentColor; }
 
-    // Status patterns per PRD v0.5 (pairing/ota/error/operational idle)
-    enum class StatusMode { None, Pairing, OTA, Error, Idle };
+    // Status patterns per PRD v0.5 (pairing/ota/error/operational)
+    // Added Connected mode: green trailing animation indicating readiness
+    enum class StatusMode { None, Pairing, OTA, Error, Idle, Connected, Wave };
     void setStatus(StatusMode mode);
     bool isAnimating() const { return status != StatusMode::None; }
+    
+    // Wave control (coordinated test)
+    void startWave(uint16_t periodMs, uint32_t durationMs);
 
 private:
     Adafruit_NeoPixel strip;
