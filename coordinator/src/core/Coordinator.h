@@ -46,6 +46,17 @@ private:
     void logConnectedNodes();
     void checkStaleConnections();
     void sendHealthPings();
+
+    // Button/flash state
+    bool buttonDown = false;
+    bool longPressActive = false;
+    bool flashAllActive = false;
+    bool flashOn = false;
+    uint32_t lastFlashTick = 0;
+    uint32_t buttonPressedAt = 0;
+    void startFlashAll();
+    void stopFlashAll();
+    void flashAllTick(uint32_t now);
     
     // Event handlers
     void onMmWaveEvent(const MmWaveEvent& event);

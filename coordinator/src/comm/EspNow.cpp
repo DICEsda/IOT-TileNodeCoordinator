@@ -16,9 +16,23 @@ static std::map<String, uint32_t> s_recentJoin;
 // ✓ ESP-NOW v2.0 callback signatures (Checklist: ESP-NOW Version)
 // v2 uses esp_now_recv_info_t instead of passing MAC directly
 void staticRecvCallback(const esp_now_recv_info_t* recv_info, const uint8_t* data, int len) {
-    // Reduce noise: only debug on RX callback
+    // Extract RSSI and pass to handler (ESP-NOW v2.0 provides RSSI in recv_info)
     if (s_self && recv_info && recv_info->src_addr) {
         s_self->handleEspNowReceive(recv_info->src_addr, data, len);
+        
+        // Update RSSI stats (rx_ctrl is a pointer in ESP-NOW v2.0)
+        char macStr[18];
+        snprintf(macStr, sizeof(macStr), "%02X:%02X:%02X:%02X:%02X:%02X",
+                 recv_info->src_addr[0], recv_info->src_addr[1], recv_info->src_addr[2],
+                 recv_info->src_addr[3], recv_info->src_addr[4], recv_info->src_addr[5]);
+        String smac(macStr);
+        
+        auto& stats = s_self->peerStats[smac];
+        if (recv_info->rx_ctrl) {
+            stats.lastRssi = recv_info->rx_ctrl->rssi;
+        }
+        stats.lastSeenMs = millis();
+        stats.messageCount++;
     } else {
         Logger::error("s_self is NULL or invalid recv_info in receive callback!");
     }
@@ -29,9 +43,24 @@ void staticSendCallback(const uint8_t* mac, esp_now_send_status_t status) {
         Logger::warn("ESP-NOW V2: send_cb (null mac) status=%d", (int)status);
         return;
     }
+    
     char macStr[18];
     snprintf(macStr, sizeof(macStr), "%02X:%02X:%02X:%02X:%02X:%02X",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    
+    // Update stats and trigger error callback
+    if (s_self) {
+        String smac(macStr);
+        auto& stats = s_self->peerStats[smac];
+        if (status != ESP_NOW_SEND_SUCCESS) {
+            stats.failedCount++;
+            // Trigger error callback for visual feedback
+            if (s_self->sendErrorCallback) {
+                s_self->sendErrorCallback(smac);
+            }
+        }
+    }
+    
     if (status == ESP_NOW_SEND_SUCCESS) {
         Logger::debug("ESP-NOW V2: send_cb OK -> %s", macStr);
     } else {
@@ -65,7 +94,8 @@ EspNow::EspNow()
     : pairingEnabled(false)
     , pairingEndTime(0)
     , messageCallback(nullptr)
-    , pairingCallback(nullptr) {}
+    , pairingCallback(nullptr)
+    , sendErrorCallback(nullptr) {}
 
 EspNow::~EspNow() {}
 
@@ -218,30 +248,38 @@ bool EspNow::begin() {
 void EspNow::loop() {
     // Debug: Periodically log that we're alive and waiting
     static uint32_t lastDebugLog = 0;
-    if (millis() - lastDebugLog > 10000) {
-        Logger::debug("ESP-NOW: Loop running, pairing=%d", isPairingEnabled());
-        lastDebugLog = millis();
+    uint32_t now = millis();
+    if (now - lastDebugLog > 10000) {
+        Logger::debug("ESP-NOW: Loop running, pairing=%d, peers=%d", isPairingEnabled(), peers.size());
+        lastDebugLog = now;
     }
 
-    // While pairing, broadcast a small beacon to trigger nodes to send JOIN immediately
+    // Optimized pairing beacon with adaptive frequency
     if (isPairingEnabled()) {
         static uint32_t lastBeacon = 0;
-        if (millis() - lastBeacon > 1500) {
+        uint32_t elapsed = now - (pairingEndTime - 30000); // Time since pairing started (assume 30s window)
+        // Faster beacons in first 10 seconds, slower after
+        uint32_t beaconInterval = (elapsed < 10000) ? 800 : 2000;
+        
+        if (now - lastBeacon > beaconInterval) {
             uint8_t bcast[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
             const char* ping = "{\"msg\":\"pairing_ping\"}";
-            esp_now_send(bcast, (const uint8_t*)ping, strlen(ping));
-            lastBeacon = millis();
+            esp_err_t res = esp_now_send(bcast, (const uint8_t*)ping, strlen(ping));
+            if (res != ESP_OK) {
+                Logger::debug("Pairing beacon failed: %d", (int)res);
+            }
+            lastBeacon = now;
         }
     }
 
     // Check pairing timeout
-    if (pairingEnabled && millis() > pairingEndTime) {
+    if (pairingEnabled && now > pairingEndTime) {
         pairingEnabled = false;
         Logger::info("ESP-NOW: Pairing window closed");
     }
 }
 
-bool EspNow::sendLightCommand(const String& nodeId, uint8_t brightness, uint16_t fadeMs) {
+bool EspNow::sendLightCommand(const String& nodeId, uint8_t brightness, uint16_t fadeMs, bool overrideStatus, uint16_t ttlMs) {
     uint8_t mac[6];
     if (!macStringToBytes(nodeId, mac)) {
         Logger::warn("sendLightCommand: invalid MAC string %s", nodeId.c_str());
@@ -257,8 +295,8 @@ bool EspNow::sendLightCommand(const String& nodeId, uint8_t brightness, uint16_t
     msg.light_id = ""; // coordinator will publish state mapping separately
     msg.r = 0; msg.g = 0; msg.b = 0; msg.w = brightness;
     msg.fade_ms = fadeMs;
-    msg.override_status = false;
-    msg.ttl_ms = 1500;
+    msg.override_status = overrideStatus;
+    msg.ttl_ms = ttlMs;
 
     String json = msg.toJson();
     bool ok = sendToMac(mac, json);
@@ -296,23 +334,27 @@ void EspNow::setPairingCallback(std::function<void(const uint8_t* mac, const uin
     pairingCallback = callback;
 }
 
+void EspNow::setSendErrorCallback(std::function<void(const String& nodeId)> callback) {
+    sendErrorCallback = callback;
+}
+
 void EspNow::handleEspNowReceive(const uint8_t* mac, const uint8_t* data, int len) {
     // Validate parameters first
     if (!mac || !data || len <= 0 || len > 250) {
-        Logger::error("Invalid ESP-NOW receive parameters: mac=%p, data=%p, len=%d", 
-                     (void*)mac, (void*)data, len);
-        return;
+        return; // Silent drop for invalid packets
+    }
+    
+    // Quick filter: must be JSON
+    if (((const char*)data)[0] != '{') {
+        return; // Drop non-JSON frames silently
     }
     
     char macStr[18];
     snprintf(macStr, sizeof(macStr), "%02X:%02X:%02X:%02X:%02X:%02X",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     
-    // Reduce noise: compact RX logging at DEBUG level
+    // Only log at DEBUG level to reduce overhead
     Logger::debug("RX %dB from %s", len, macStr);
-
-    String payload((const char*)data, len);
-    Logger::debug("Payload: %s", payload.c_str());
     
     processReceivedData(mac, data, len);
 }
@@ -325,36 +367,15 @@ void EspNow::processReceivedData(const uint8_t* mac, const uint8_t* data, int le
     char macStr[18];
     snprintf(macStr, sizeof(macStr), "%02X:%02X:%02X:%02X:%02X:%02X",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-    String nodeId = String(macStr);
-
+    
+    // Avoid String allocation for nodeId until needed
     // Basic forwarding: if pairing is active and the message is a join_request, forward raw data
     String payload((const char*)data, len);
     MessageType mt = MessageFactory::getMessageType(payload);
     
-    Logger::debug("Processing message type=%d from %s", (int)mt, macStr);
-
+    // Only log at debug when needed
     if (mt == MessageType::JOIN_REQUEST) {
-        Logger::info("*** JOIN_REQUEST detected from %s ***", macStr);
-        
-        if (isPairingEnabled()) {
-            Logger::info("Pairing is enabled - processing JOIN_REQUEST");
-            if (pairingCallback) {
-                Logger::info("Calling pairingCallback...");
-                pairingCallback(mac, data, (size_t)len);
-            } else {
-                Logger::error("CRITICAL: Pairing active but no pairingCallback registered!");
-            }
-            // Also ensure peer exists so that accept message can be sent directly
-            addPeer(mac);
-        } else {
-            Logger::warn("JOIN_REQUEST received but pairing is NOT enabled - press button to enable pairing");
-        }
-        return;
-    }
-
-    // Handle JOIN_REQUEST explicitly to open pairing path even if window not active
-    if (mt == MessageType::JOIN_REQUEST) {
-        Logger::info("JOIN_REQUEST received from %s", macStr);
+        Logger::info("JOIN_REQUEST from %s", macStr);
         // Deduplicate JOIN within 4s per MAC
         uint32_t nowMs = millis();
         auto it = s_recentJoin.find(String(macStr));
@@ -364,24 +385,29 @@ void EspNow::processReceivedData(const uint8_t* mac, const uint8_t* data, int le
         }
         s_recentJoin[String(macStr)] = nowMs;
 
+        // Always ensure peer exists so we can unicast responses
+        addPeer(mac);
+
         if (isPairingEnabled()) {
-            addPeer(mac); // ensure we can unicast JOIN_ACCEPT
             if (pairingCallback) {
                 pairingCallback(mac, data, (size_t)len);
             } else {
                 Logger::error("Pairing active but no pairingCallback registered");
             }
         } else {
-            Logger::warn("JOIN_REQUEST ignored (pairing not active)");
+        // Forward to general handler so Coordinator can re-accept known nodes
+            if (messageCallback) {
+                String nodeId(macStr);
+                messageCallback(nodeId, (const uint8_t*)payload.c_str(), payload.length());
+            }
         }
         return;
     }
 
     // Forward other messages via general callback
     if (messageCallback) {
+        String nodeId(macStr);
         messageCallback(nodeId, (const uint8_t*)payload.c_str(), payload.length());
-    } else {
-        Logger::warn("Message received but no messageCallback registered");
     }
 }
 
@@ -392,10 +418,32 @@ bool EspNow::sendToMac(const uint8_t mac[6], const String& json) {
         return false;
     }
     
+    char macStr[18];
+    snprintf(macStr, sizeof(macStr), "%02X:%02X:%02X:%02X:%02X:%02X",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    
     // ✓ Checklist: Error Handling - Check send result
     esp_err_t res = esp_now_send(mac, (uint8_t*)json.c_str(), json.length());
     if (res != ESP_OK) {
-        Logger::warn("ESP-NOW V2 send failed: %d (will retry via callback)", res);
+        // ESP_ERR_ESPNOW_NOT_FOUND (12393) means peer not registered - try adding
+        if (res == ESP_ERR_ESPNOW_NOT_FOUND) {
+            Logger::info("Peer %s not found in ESP-NOW, adding...", macStr);
+            if (addPeer(mac)) {
+                // Small delay to ensure peer is registered
+                delay(10);
+                // Retry send after adding peer
+                res = esp_now_send(mac, (uint8_t*)json.c_str(), json.length());
+                if (res == ESP_OK) {
+                    Logger::info("Send successful after adding peer %s", macStr);
+                    return true;
+                } else {
+                    Logger::warn("Send to %s failed after adding peer: %d", macStr, res);
+                }
+            } else {
+                Logger::warn("Failed to add peer %s", macStr);
+            }
+        }
+        Logger::warn("ESP-NOW V2 send failed to %s: %d", macStr, res);
         return false;
     }
     return true;
@@ -403,6 +451,12 @@ bool EspNow::sendToMac(const uint8_t mac[6], const String& json) {
 
 bool EspNow::addPeer(const uint8_t mac[6]) {
     // ✓ Checklist: Peer Registration - Register node's MAC on coordinator
+    char macStr[18];
+    snprintf(macStr, sizeof(macStr), "%02X:%02X:%02X:%02X:%02X:%02X",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    String smac(macStr);
+    
+    // Always try to add peer to ESP-NOW (it will return EXIST if already there)
     esp_now_peer_info_t peerInfo = {};
     memcpy(peerInfo.peer_addr, mac, 6);
     peerInfo.channel = 1; // Must match coordinator's channel
@@ -410,22 +464,40 @@ bool EspNow::addPeer(const uint8_t mac[6]) {
     peerInfo.ifidx = WIFI_IF_STA;
     
     esp_err_t res = esp_now_add_peer(&peerInfo);
-    if (res == ESP_OK || res == ESP_ERR_ESPNOW_EXIST) {
-        char macStr[18];
-        snprintf(macStr, sizeof(macStr), "%02X:%02X:%02X:%02X:%02X:%02X",
-                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-        String smac(macStr);
-        bool found=false; 
-        for (auto& s:peers){ if (s==smac){found=true;break;} }
-        if (!found) { 
-            peers.push_back(smac); 
-            savePeersToStorage(); 
-            Logger::info("✓ Peer registered: %s", macStr);
+    if (res == ESP_OK) {
+        // Successfully added - update our cache
+        bool found = false;
+        for (const auto& s : peers) {
+            if (s == smac) {
+                found = true;
+                break;
+            }
         }
+        if (!found) {
+            peers.push_back(smac);
+            savePeersToStorage();
+        }
+        Logger::info("✓ Peer registered: %s", macStr);
         return true;
+    } else if (res == ESP_ERR_ESPNOW_EXIST) {
+        // Already exists in ESP-NOW - ensure it's in our cache
+        bool found = false;
+        for (const auto& s : peers) {
+            if (s == smac) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            peers.push_back(smac);
+            savePeersToStorage();
+        }
+        Logger::debug("Peer already registered: %s", macStr);
+        return true;
+    } else {
+        Logger::warn("✗ Failed to add peer %s: error %d", macStr, res);
+        return false;
     }
-    Logger::warn("✗ Failed to add peer: error %d", res);
-    return false;
 }
 
 bool EspNow::removePeer(const uint8_t mac[6]) {
@@ -441,6 +513,33 @@ bool EspNow::removePeer(const uint8_t mac[6]) {
     }
     Logger::warn("Failed to remove peer: %d", res);
     return false;
+}
+
+void EspNow::clearAllPeers() {
+    Logger::info("Clearing all ESP-NOW peers...");
+    size_t count = peers.size();
+    
+    // Remove all peers from ESP-NOW
+    for (const auto& macStr : peers) {
+        uint8_t mac[6];
+        if (macStringToBytes(macStr, mac)) {
+            esp_now_del_peer(mac);
+        }
+    }
+    
+    // Clear internal lists
+    peers.clear();
+    peerStats.clear();
+    
+    // Clear storage
+    Preferences p;
+    if (p.begin(PREFS_NS, false)) {
+        p.clear();
+        p.putUInt("count", 0);
+        p.end();
+    }
+    
+    Logger::info("Cleared %d ESP-NOW peers", count);
 }
 
 void EspNow::loadPeersFromStorage() {
@@ -476,4 +575,17 @@ void EspNow::savePeersToStorage() {
     }
     p.end();
     Logger::debug("Saved %d peers to storage", peers.size());
+}
+
+int8_t EspNow::getPeerRssi(const String& macStr) const {
+    auto it = peerStats.find(macStr);
+    return (it != peerStats.end()) ? it->second.lastRssi : -127;
+}
+
+PeerStats EspNow::getPeerStats(const String& macStr) const {
+    auto it = peerStats.find(macStr);
+    if (it != peerStats.end()) {
+        return it->second;
+    }
+    return PeerStats{-127, 0, 0, 0};
 }

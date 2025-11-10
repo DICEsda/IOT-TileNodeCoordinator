@@ -1,0 +1,134 @@
+<div class="calibrate-container">
+  <div class="calibrate-header card">
+    <div class="header-left">
+      <h2>Sensor Calibration</h2>
+      <p>Calibrate sensors for optimal performance and accuracy</p>
+    </div>
+    <button
+      class="button button-primary"
+      [disabled]="isCalibrating()"
+      (click)="startFullCalibration()">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M12 1v6m0 6v6M5.64 5.64l4.24 4.24m4.24 4.24l4.24 4.24M1 12h6m6 0h6M5.64 18.36l4.24-4.24m4.24-4.24l4.24-4.24"/>
+      </svg>
+      {{ isCalibrating() ? 'Calibrating...' : 'Start Full Calibration' }}
+    </button>
+  </div>
+
+  <!-- Calibration Steps -->
+  @if (isCalibrating()) {
+    <div class="calibration-progress card">
+      <h3>Calibration Progress</h3>
+      <div class="steps-container">
+        @for (step of calibrationSteps(); track step.id) {
+          <div class="step-item" [class]="step.status">
+            <div class="step-icon">
+              @if (step.status === 'completed') {
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                  <polyline points="22 4 12 14.01 9 11.01"/>
+                </svg>
+              } @else if (step.status === 'running') {
+                <div class="spinner"></div>
+              } @else {
+                <div class="step-number">{{ step.id }}</div>
+              }
+            </div>
+            <div class="step-content">
+              <h4>{{ step.title }}</h4>
+              <p>{{ step.description }}</p>
+              @if (step.status === 'running') {
+                <div class="progress-bar">
+                  <div class="progress-fill" [style.width.%]="step.progress"></div>
+                  <span class="progress-text">{{ step.progress }}%</span>
+                </div>
+              }
+            </div>
+          </div>
+        }
+      </div>
+    </div>
+  }
+
+  <!-- Individual Node Calibration -->
+  <div class="nodes-calibration">
+    <h3 class="section-title">Individual Node Calibration</h3>
+    <div class="nodes-grid">
+      @for (node of nodes(); track node.nodeId) {
+        <div class="node-card card" [class]="node.status">
+          <div class="node-header">
+            <div class="node-info">
+              <h4>{{ node.nodeName }}</h4>
+              <div class="calibration-status" [class]="node.status">
+                <span class="status-dot"></span>
+                @if (node.status === 'success') {
+                  <span>Calibrated</span>
+                } @else if (node.status === 'warning') {
+                  <span>Needs Calibration</span>
+                } @else if (node.status === 'error') {
+                  <span>Calibration Required</span>
+                } @else {
+                  <span>Not Calibrated</span>
+                }
+              </div>
+            </div>
+          </div>
+
+          <div class="node-details">
+            <div class="detail-item">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <polyline points="12 6 12 12 16 14"/>
+              </svg>
+              <span>{{ formatLastCalibrated(node.lastCalibrated) }}</span>
+            </div>
+          </div>
+
+          <button
+            class="calibrate-btn"
+            [disabled]="node.isCalibrating"
+            (click)="calibrateNode(node.nodeId)">
+            @if (node.isCalibrating) {
+              <div class="btn-spinner"></div>
+              <span>Calibrating...</span>
+            } @else {
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M12 1v6m0 6v6M5.64 5.64l4.24 4.24m4.24 4.24l4.24 4.24M1 12h6m6 0h6M5.64 18.36l4.24-4.24m4.24-4.24l4.24-4.24"/>
+              </svg>
+              <span>Calibrate Now</span>
+            }
+          </button>
+        </div>
+      }
+    </div>
+  </div>
+
+  <!-- Calibration Info -->
+  <div class="calibration-info card">
+    <h3>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10"/>
+        <line x1="12" y1="16" x2="12" y2="12"/>
+        <line x1="12" y1="8" x2="12.01" y2="8"/>
+      </svg>
+      Calibration Information
+    </h3>
+    <div class="info-grid">
+      <div class="info-item">
+        <h4>Why Calibrate?</h4>
+        <p>Regular calibration ensures optimal sensor performance and accuracy. It helps maintain consistent detection ranges and response times.</p>
+      </div>
+      <div class="info-item">
+        <h4>When to Calibrate?</h4>
+        <p>Calibrate sensors after initial installation, when relocating nodes, or if you notice inconsistent behavior. We recommend calibrating every 30 days.</p>
+      </div>
+      <div class="info-item">
+        <h4>Calibration Process</h4>
+        <p>During calibration, please ensure the area is clear of movement and obstructions. The process typically takes 2-3 minutes per node.</p>
+      </div>
+    </div>
+  </div>
+</div>
+

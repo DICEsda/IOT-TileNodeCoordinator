@@ -1,0 +1,395 @@
+{
+  "info": {
+    "name": "IOT Smart Tile API",
+    "description": "Complete API collection for IOT Smart Tile System",
+    "version": "1.0.0",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8000",
+      "type": "string"
+    },
+    {
+      "key": "siteId",
+      "value": "site001",
+      "type": "string"
+    },
+    {
+      "key": "coordId",
+      "value": "coord001",
+      "type": "string"
+    },
+    {
+      "key": "nodeId",
+      "value": "node001",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/health",
+          "host": ["{{baseUrl}}"],
+          "path": ["health"]
+        },
+        "description": "Check if backend service is healthy"
+      }
+    },
+    {
+      "name": "Sites",
+      "item": [
+        {
+          "name": "Get All Sites",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/sites",
+              "host": ["{{baseUrl}}"],
+              "path": ["sites"]
+            }
+          }
+        },
+        {
+          "name": "Get Site By ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/sites/{{siteId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["sites", "{{siteId}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Coordinators",
+      "item": [
+        {
+          "name": "Get Coordinator By ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/coordinators/{{coordId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["coordinators", "{{coordId}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Nodes",
+      "item": [
+        {
+          "name": "Get Node By ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/nodes/{{nodeId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["nodes", "{{nodeId}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Commands",
+      "item": [
+        {
+          "name": "Set Light",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"node_id\": \"{{nodeId}}\",\n  \"light_id\": \"L01\",\n  \"r\": 255,\n  \"g\": 180,\n  \"b\": 120,\n  \"w\": 200,\n  \"fade_ms\": 500,\n  \"override_status\": true\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/set-light",
+              "host": ["{{baseUrl}}"],
+              "path": ["set-light"]
+            },
+            "description": "Send RGBW color command to a specific node"
+          }
+        },
+        {
+          "name": "Set Color Profile",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"coord_id\": \"{{coordId}}\",\n  \"profile\": {\n    \"presence\": {\n      \"r\": 255,\n      \"g\": 180,\n      \"b\": 120,\n      \"w\": 255\n    },\n    \"idle\": {\n      \"r\": 0,\n      \"g\": 0,\n      \"b\": 0,\n      \"w\": 50\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/color-profile",
+              "host": ["{{baseUrl}}"],
+              "path": ["color-profile"]
+            }
+          }
+        },
+        {
+          "name": "Approve Pairing",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"coord_id\": \"{{coordId}}\",\n  \"node_mac\": \"AA:BB:CC:DD:EE:FF\",\n  \"approve\": true\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/pairing/approve",
+              "host": ["{{baseUrl}}"],
+              "path": ["pairing", "approve"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "OTA Updates",
+      "item": [
+        {
+          "name": "Start OTA Update",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"target_type\": \"node\",\n  \"target_id\": \"{{nodeId}}\",\n  \"firmware_url\": \"http://example.com/firmware.bin\",\n  \"version\": \"1.0.1\",\n  \"md5\": \"abc123...\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/ota/start",
+              "host": ["{{baseUrl}}"],
+              "path": ["ota", "start"]
+            }
+          }
+        },
+        {
+          "name": "Get OTA Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ota/status?job_id=12345",
+              "host": ["{{baseUrl}}"],
+              "path": ["ota", "status"],
+              "query": [
+                {
+                  "key": "job_id",
+                  "value": "12345"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Google Home",
+      "item": [
+        {
+          "name": "Smart Home Fulfillment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"requestId\": \"test-request-1\",\n  \"inputs\": [{\n    \"intent\": \"action.devices.SYNC\"\n  }]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/google/home/fulfillment",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "google", "home", "fulfillment"]
+            },
+            "description": "Google Assistant Smart Home fulfillment endpoint"
+          }
+        },
+        {
+          "name": "Report State",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"user-001\",\n  \"device_id\": \"node-001\",\n  \"state\": {\n    \"online\": true,\n    \"on\": true,\n    \"brightness\": 80,\n    \"color\": {\n      \"spectrumRgb\": 16711680\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/google/home/report-state",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "google", "home", "report-state"]
+            },
+            "description": "Report device state to Google Home"
+          }
+        },
+        {
+          "name": "Request Sync",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"user-001\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/google/home/request-sync",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "google", "home", "request-sync"]
+            },
+            "description": "Request Google to sync devices"
+          }
+        },
+        {
+          "name": "OAuth Authorize",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/oauth/google/authorize?client_id=CLIENT_ID&redirect_uri=REDIRECT_URI&state=STATE&response_type=code",
+              "host": ["{{baseUrl}}"],
+              "path": ["oauth", "google", "authorize"],
+              "query": [
+                {
+                  "key": "client_id",
+                  "value": "CLIENT_ID"
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "REDIRECT_URI"
+                },
+                {
+                  "key": "state",
+                  "value": "STATE"
+                },
+                {
+                  "key": "response_type",
+                  "value": "code"
+                }
+              ]
+            },
+            "description": "OAuth authorization endpoint"
+          }
+        },
+        {
+          "name": "OAuth Token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "type": "text"
+                },
+                {
+                  "key": "code",
+                  "value": "AUTH_CODE",
+                  "type": "text"
+                },
+                {
+                  "key": "client_id",
+                  "value": "CLIENT_ID",
+                  "type": "text"
+                },
+                {
+                  "key": "client_secret",
+                  "value": "CLIENT_SECRET",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/oauth/google/token",
+              "host": ["{{baseUrl}}"],
+              "path": ["oauth", "google", "token"]
+            },
+            "description": "OAuth token exchange"
+          }
+        }
+      ]
+    },
+    {
+      "name": "WebSocket",
+      "item": [
+        {
+          "name": "Connect to WebSocket",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Upgrade",
+                "value": "websocket"
+              },
+              {
+                "key": "Connection",
+                "value": "Upgrade"
+              }
+            ],
+            "url": {
+              "raw": "ws://localhost:8000/ws",
+              "protocol": "ws",
+              "host": ["localhost"],
+              "port": "8000",
+              "path": ["ws"]
+            },
+            "description": "WebSocket endpoint for real-time telemetry"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+# Bazel outputs
+/bazel-*
+/bazel-out/
+/bazel-bin/
+/bazel-testlogs/
+/bazel-IOT-Backend/
+
+# Bazel cache
+/.cache/bazel/
+
+# optional editor files
+.vscode/
+/.idea/
+
+
+/mosquitto/data/
+/mosquitto/log/

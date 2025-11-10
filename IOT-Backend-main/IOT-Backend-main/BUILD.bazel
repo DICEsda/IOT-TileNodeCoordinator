@@ -1,0 +1,8 @@
+# IOT-Backend/BUILD.bazel
+
+load("@gazelle//:def.bzl", "gazelle")
+
+gazelle(
+    name = "gazelle",
+    prefix = "github.com/DICEsda/IOT-TileNodeCoordinator/backend",
+)

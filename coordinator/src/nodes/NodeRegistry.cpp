@@ -85,6 +85,19 @@ bool NodeRegistry::unregisterNode(const String& nodeId) {
     return true;
 }
 
+void NodeRegistry::clearAllNodes() {
+    size_t count = nodes.size();
+    nodes.clear();
+    lightToNode.clear();
+    
+    if (prefsInitialized) {
+        prefs.clear();
+        prefs.putUInt("count", 0);
+    }
+    
+    Logger::info("Cleared all nodes (count: %d)", count);
+}
+
 void NodeRegistry::startPairing(uint32_t durationMs) {
     pairingActive = true;
     pairingEndTime = millis() + durationMs;
@@ -109,6 +122,14 @@ bool NodeRegistry::processPairingRequest(const uint8_t* mac, const String& nodeI
         Logger::warning("Rejected pairing request from %s: pairing not active", nodeId.c_str());
         return false;
     }
+    
+    // Check if already registered - if so, just update lastSeen and return success
+    if (nodes.find(nodeId) != nodes.end()) {
+        Logger::info("Re-pairing known node %s", nodeId.c_str());
+        nodes[nodeId].lastSeenMs = millis();
+        return true; // Allow re-pairing
+    }
+    
     // Generate a stable light ID from MAC last 3 bytes
     char lightIdBuf[16];
     snprintf(lightIdBuf, sizeof(lightIdBuf), "L%02X%02X%02X", mac[3], mac[4], mac[5]);

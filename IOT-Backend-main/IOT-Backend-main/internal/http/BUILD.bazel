@@ -1,0 +1,39 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "handler",
+    srcs = [
+        "coordinators.go",
+        "handler.go",
+        "sites.go",
+    ],
+    importpath = "github.com/DICEsda/IOT-TileNodeCoordinator/backend/handler",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//config",
+        "//repository",
+        "@com_github_eclipse_paho_mqtt_golang//:paho_mqtt_golang",
+        "@com_github_gorilla_mux//:mux",
+        "@com_github_gorilla_websocket//:websocket",
+        "@org_uber_go_fx//:fx",
+    ],
+)
+
+go_library(
+    name = "http",
+    srcs = [
+        "handler.go",
+        "module.go",
+        "server.go",
+    ],
+    importpath = "github.com/DICEsda/IOT-TileNodeCoordinator/backend/internal/http",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/config",
+        "//internal/repository",
+        "@com_github_eclipse_paho_mqtt_golang//:paho_mqtt_golang",
+        "@com_github_gorilla_mux//:mux",
+        "@com_github_gorilla_websocket//:websocket",
+        "@org_uber_go_fx//:fx",
+    ],
+)

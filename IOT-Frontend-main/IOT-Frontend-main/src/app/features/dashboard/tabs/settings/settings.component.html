@@ -1,0 +1,205 @@
+<div class="settings-container">
+  <div class="settings-header card">
+    <h2>System Settings</h2>
+    <div class="header-actions">
+      <button class="button button-primary" (click)="saveSettings()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+          <polyline points="17 21 17 13 7 13 7 21"/>
+          <polyline points="7 3 7 8 15 8"/>
+        </svg>
+        Save Changes
+      </button>
+      <button class="button" (click)="resetToDefaults()" style="background: var(--bg-tertiary); color: var(--text-secondary);">
+        Reset to Defaults
+      </button>
+    </div>
+  </div>
+
+  <div class="settings-grid">
+    <!-- System Configuration -->
+    <div class="settings-section card">
+      <h3>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M12 1v6m0 6v6M5.64 5.64l4.24 4.24m4.24 4.24l4.24 4.24M1 12h6m6 0h6M5.64 18.36l4.24-4.24m4.24-4.24l4.24-4.24"/>
+        </svg>
+        System Configuration
+      </h3>
+
+      <div class="setting-item">
+        <div class="setting-info">
+          <label>Automatic Mode</label>
+          <p>Automatically control lights based on motion detection</p>
+        </div>
+        <div
+          class="toggle-switch"
+          [class.active]="autoMode()"
+          (click)="autoMode.set(!autoMode())">
+        </div>
+      </div>
+
+      <div class="setting-item">
+        <div class="setting-info">
+          <label>Motion Sensitivity</label>
+          <p>Adjust sensor sensitivity ({{ motionSensitivity() }}%)</p>
+        </div>
+        <input
+          type="range"
+          min="0"
+          max="100"
+          [value]="motionSensitivity()"
+          (input)="motionSensitivity.set(+$any($event.target).value)"
+          class="slider">
+      </div>
+
+      <div class="setting-item">
+        <div class="setting-info">
+          <label>Light Intensity</label>
+          <p>Default brightness level ({{ lightIntensity() }}%)</p>
+        </div>
+        <input
+          type="range"
+          min="0"
+          max="100"
+          [value]="lightIntensity()"
+          (input)="lightIntensity.set(+$any($event.target).value)"
+          class="slider">
+      </div>
+
+      <div class="setting-item">
+        <div class="setting-info">
+          <label>Auto-off Delay</label>
+          <p>Time before lights turn off ({{ delayBeforeOff() }} seconds)</p>
+        </div>
+        <input
+          type="number"
+          min="5"
+          max="300"
+          [value]="delayBeforeOff()"
+          (input)="delayBeforeOff.set(+$any($event.target).value)"
+          class="number-input">
+      </div>
+    </div>
+
+    <!-- Notifications -->
+    <div class="settings-section card">
+      <h3>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+          <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+        </svg>
+        Notifications
+      </h3>
+
+      <div class="setting-item">
+        <div class="setting-info">
+          <label>Email Notifications</label>
+          <p>Receive alerts via email</p>
+        </div>
+        <div
+          class="toggle-switch"
+          [class.active]="emailNotifications()"
+          (click)="emailNotifications.set(!emailNotifications())">
+        </div>
+      </div>
+
+      <div class="setting-item">
+        <div class="setting-info">
+          <label>Push Notifications</label>
+          <p>Receive push notifications on your device</p>
+        </div>
+        <div
+          class="toggle-switch"
+          [class.active]="pushNotifications()"
+          (click)="pushNotifications.set(!pushNotifications())">
+        </div>
+      </div>
+
+      <div class="setting-item">
+        <div class="setting-info">
+          <label>Battery Alerts</label>
+          <p>Get notified when battery is low</p>
+        </div>
+        <div
+          class="toggle-switch"
+          [class.active]="batteryAlerts()"
+          (click)="batteryAlerts.set(!batteryAlerts())">
+        </div>
+      </div>
+
+      <div class="setting-item">
+        <div class="setting-info">
+          <label>Motion Alerts</label>
+          <p>Get notified when motion is detected</p>
+        </div>
+        <div
+          class="toggle-switch"
+          [class.active]="motionAlerts()"
+          (click)="motionAlerts.set(!motionAlerts())">
+        </div>
+      </div>
+    </div>
+
+    <!-- Advanced Settings -->
+    <div class="settings-section card">
+      <h3>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polygon points="12 2 2 7 12 12 22 7 12 2"/>
+          <polyline points="2 17 12 22 22 17"/>
+          <polyline points="2 12 12 17 22 12"/>
+        </svg>
+        Advanced Settings
+      </h3>
+
+      <div class="setting-item">
+        <div class="setting-info">
+          <label>Data Logging</label>
+          <p>Record sensor data and events</p>
+        </div>
+        <div
+          class="toggle-switch"
+          [class.active]="dataLogging()"
+          (click)="dataLogging.set(!dataLogging())">
+        </div>
+      </div>
+
+      <div class="setting-item">
+        <div class="setting-info">
+          <label>Cloud Sync</label>
+          <p>Sync data with cloud servers</p>
+        </div>
+        <div
+          class="toggle-switch"
+          [class.active]="cloudSync()"
+          (click)="cloudSync.set(!cloudSync())">
+        </div>
+      </div>
+
+      <div class="setting-item">
+        <div class="setting-info">
+          <label>Energy Saving Mode</label>
+          <p>Reduce power consumption</p>
+        </div>
+        <div
+          class="toggle-switch"
+          [class.active]="energySavingMode()"
+          (click)="energySavingMode.set(!energySavingMode())">
+        </div>
+      </div>
+
+      <div class="setting-item">
+        <div class="setting-info">
+          <label>Debug Mode</label>
+          <p>Enable detailed logging for troubleshooting</p>
+        </div>
+        <div
+          class="toggle-switch"
+          [class.active]="debugMode()"
+          (click)="debugMode.set(!debugMode())">
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+

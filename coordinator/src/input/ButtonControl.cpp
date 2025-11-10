@@ -4,28 +4,30 @@
 ButtonControl::ButtonControl()
     : eventCallback(nullptr)
     , longPressCallback(nullptr)
+    , veryLongPressCallback(nullptr)
     , lastButtonState(true)  // Pull-up, so default is HIGH
     , lastReading(true)
     , lastDebounceTime(0)
     , pressStartTime(0)
-    , longPressTriggered(false) {
+    , longPressTriggered(false)
+    , veryLongPressTriggered(false) {
 }
 
 ButtonControl::~ButtonControl() {
 }
 
 bool ButtonControl::begin() {
-    // TTP223 capacitive touch sensor outputs HIGH when touched (active-high)
-    pinMode(Pins::PAIRING_BUTTON, INPUT);
-    activeLow = false; // TTP223 is active-high
-    
+    // Physical push button with internal pull-up; pressed = LOW (active-low)
+    pinMode(Pins::PAIRING_BUTTON, INPUT_PULLUP);
+    activeLow = true;
+
     delay(50); // Let the pin settle
-    
+
     // Initialize state tracking
     lastReading = digitalRead(Pins::PAIRING_BUTTON);
     lastButtonState = lastReading;
-    
-    Logger::info("TTP223 touch sensor initialized on pin %d (active-high, initial: %s)", 
+
+    Logger::info("Button initialized on pin %d (INPUT_PULLUP, pressed=LOW, initial=%s)",
                  Pins::PAIRING_BUTTON, lastReading == HIGH ? "HIGH" : "LOW");
     return true;
 }
@@ -52,17 +54,27 @@ void ButtonControl::loop() {
             if (pressed) {
                 pressStartTime = now;
                 longPressTriggered = false;
+                veryLongPressTriggered = false;
             }
             
-            Logger::info("Touch %s", pressed ? "DETECTED" : "RELEASED");
+            Logger::info("Button %s", pressed ? "PRESSED" : "RELEASED");
             handleButtonChange(pressed);
         }
     }
     
-    // Check for long press (4s hold)
+    // Check for long press (4s hold) and very long press (10s hold)
     bool pressed = activeLow ? !lastButtonState : lastButtonState;
-    if (pressed && !longPressTriggered && pressStartTime > 0) {
-        if ((now - pressStartTime) >= LONG_PRESS_MS) {
+    if (pressed && pressStartTime > 0) {
+        // Check for very long press (10s) first
+        if (!veryLongPressTriggered && (now - pressStartTime) >= VERY_LONG_PRESS_MS) {
+            veryLongPressTriggered = true;
+            Logger::info("Button VERY LONG PRESS (10s) - CLEARING ALL NODES");
+            if (veryLongPressCallback) {
+                veryLongPressCallback();
+            }
+        }
+        // Check for regular long press (4s)
+        else if (!longPressTriggered && (now - pressStartTime) >= LONG_PRESS_MS) {
             longPressTriggered = true;
             Logger::info("Touch LONG PRESS (4s)");
             if (longPressCallback) {
@@ -78,6 +90,10 @@ void ButtonControl::setEventCallback(std::function<void(const String& buttonId, 
 
 void ButtonControl::setLongPressCallback(std::function<void()> callback) {
     longPressCallback = callback;
+}
+
+void ButtonControl::setVeryLongPressCallback(std::function<void()> callback) {
+    veryLongPressCallback = callback;
 }
 
 void ButtonControl::handleButtonChange(bool pressed) {

@@ -1,0 +1,39 @@
+<div class="visualizer-container">
+  <div class="visualizer-header">
+    <h2>3D Room Visualization</h2>
+    <div class="view-controls">
+      <span class="hint">WASD to move • Mouse drag to look • Scroll to zoom (when not moving)</span>
+    </div>
+  </div>
+  <canvas #canvas></canvas>
+  <div class="control-legend" [class.minimized]="legendMinimized">
+    <button class="legend-toggle" (click)="toggleLegend()" title="Toggle controls">
+      <span class="toggle-icon">{{ legendMinimized ? '▶' : '▼' }}</span>
+      <span class="legend-title" *ngIf="!legendMinimized">Controls</span>
+    </button>
+
+    <div class="legend-content" *ngIf="!legendMinimized">
+      <div class="legend-section">
+        <p><strong>Avatar Controls:</strong></p>
+        <ul>
+          <li><kbd>W</kbd> / <kbd>↑</kbd> - Move Forward</li>
+          <li><kbd>A</kbd> / <kbd>←</kbd> - Move Left</li>
+          <li><kbd>S</kbd> / <kbd>↓</kbd> - Move Backward</li>
+          <li><kbd>D</kbd> / <kbd>→</kbd> - Move Right</li>
+        </ul>
+      </div>
+      <div class="legend-section">
+        <p><strong>View Controls:</strong></p>
+        <ul>
+          <li><strong>Mouse Drag</strong> - Look Around (while avatar controls active)</li>
+          <li><strong>Mouse Drag</strong> - Rotate View (when no keys pressed, uses Orbit Controls)</li>
+          <li><strong>Scroll</strong> - Zoom In/Out</li>
+        </ul>
+      </div>
+      <div class="legend-section">
+        <p><strong>Lighting:</strong> Lights turn ON when you're near, OFF when you move away.</p>
+      </div>
+    </div>
+  </div>
+</div>
+

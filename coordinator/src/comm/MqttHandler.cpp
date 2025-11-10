@@ -1,6 +1,12 @@
 #include "MqttHandler.h"
 
-MqttHandler::MqttHandler() : mqttClient(wifiClient), connected(false), lastReconnectAttempt(0) {
+MqttHandler::MqttHandler() 
+    : mqttClient(wifiClient)
+    , connected(false)
+    , lastReconnectAttempt(0)
+    , siteId("site001")  // Default site ID
+    , coordId("")        // Will be set to MAC address
+{
     mqttClient.setCallback([this](char* topic, uint8_t* payload, unsigned int length) {
         this->handleMessage(topic, payload, length);
     });
@@ -11,7 +17,12 @@ MqttHandler::~MqttHandler() {
 }
 
 bool MqttHandler::begin(const char* broker, uint16_t port, 
-                       const char* username, const char* password) {
+                       const char* username, const char* password,
+                       const String& siteId, const String& coordId) {
+    // Set site and coordinator IDs
+    this->siteId = siteId;
+    this->coordId = coordId.isEmpty() ? WiFi.macAddress() : coordId;
+    
     mqttClient.setServer(broker, port);
     
     if (username && password) {
@@ -33,110 +44,95 @@ void MqttHandler::loop() {
     mqttClient.loop();
 }
 
-void MqttHandler::publishNodeState(const String& nodeId, const NodeInfo& state) {
-    StaticJsonDocument<JSON_CAPACITY> doc;
-    // Use fields available on NodeInfo
-    doc["last_duty"] = state.lastDuty;
-    doc["temperature"] = state.temperature;
-    doc["last_seen_ms"] = state.lastSeenMs;
-    
+// PRD-compliant: site/{siteId}/node/{nodeId}/telemetry
+void MqttHandler::publishNodeTelemetry(const String& nodeId, const JsonDocument& telemetry) {
+    String topic = buildNodeTelemetryTopic(nodeId);
     String payload;
-    serializeJson(doc, payload);
-    mqttClient.publish(buildNodeTopic(nodeId, "state").c_str(), payload.c_str());
+    serializeJson(telemetry, payload);
+    mqttClient.publish(topic.c_str(), payload.c_str(), false);
 }
 
-void MqttHandler::publishNodeTemperature(const String& nodeId, float temperature) {
-    StaticJsonDocument<64> doc;
-    doc["temperature"] = temperature;
-    
+// PRD-compliant: site/{siteId}/coord/{coordId}/telemetry
+void MqttHandler::publishCoordTelemetry(const JsonDocument& telemetry) {
+    String topic = buildCoordTelemetryTopic();
     String payload;
-    serializeJson(doc, payload);
-    mqttClient.publish(buildNodeTopic(nodeId, "temperature").c_str(), payload.c_str());
+    serializeJson(telemetry, payload);
+    mqttClient.publish(topic.c_str(), payload.c_str(), false);
 }
 
-void MqttHandler::publishZoneState(const String& zoneId, bool presence) {
-    StaticJsonDocument<64> doc;
-    doc["presence"] = presence;
-    
+// PRD-compliant: site/{siteId}/coord/{coordId}/mmwave
+void MqttHandler::publishMmWaveEvent(const JsonDocument& event) {
+    String topic = buildMmWaveTopic();
     String payload;
-    serializeJson(doc, payload);
-    mqttClient.publish(buildZoneTopic(zoneId, "state").c_str(), payload.c_str());
-}
-
-void MqttHandler::publishSystemStatus() {
-    StaticJsonDocument<JSON_CAPACITY> doc;
-    // Add system status fields
-    doc["uptime"] = millis() / 1000;
-    doc["free_heap"] = ESP.getFreeHeap();
-    doc["wifi_rssi"] = WiFi.RSSI();
-    
-    String payload;
-    serializeJson(doc, payload);
-    mqttClient.publish(buildTopic("status").c_str(), payload.c_str());
+    serializeJson(event, payload);
+    mqttClient.publish(topic.c_str(), payload.c_str(), false);
 }
 
 void MqttHandler::onNodeCommand(CommandCallback callback) {
     nodeCommandCallback = callback;
 }
 
-void MqttHandler::onZoneCommand(CommandCallback callback) {
-    zoneCommandCallback = callback;
-}
-
-void MqttHandler::onSystemCommand(CommandCallback callback) {
-    systemCommandCallback = callback;
+void MqttHandler::onCoordCommand(CommandCallback callback) {
+    coordCommandCallback = callback;
 }
 
 void MqttHandler::publishConfig(const String& nodeId, const JsonDocument& config) {
     String payload;
     serializeJson(config, payload);
-    mqttClient.publish(buildNodeTopic(nodeId, "config").c_str(), payload.c_str());
+    String topic = "site/" + siteId + "/node/" + nodeId + "/config";
+    mqttClient.publish(topic.c_str(), payload.c_str());
 }
 
 void MqttHandler::onConfigRequest(CommandCallback callback) {
     configCallback = callback;
 }
 
-void MqttHandler::publishDiscovery() {
-    StaticJsonDocument<JSON_CAPACITY> doc;
-    // Add discovery information
-    doc["coordinator_id"] = WiFi.macAddress();
-    doc["ip"] = WiFi.localIP().toString();
-    doc["version"] = "1.0.0"; // Update with actual version
-    
-    String payload;
-    serializeJson(doc, payload);
-    mqttClient.publish(buildTopic("discovery").c_str(), payload.c_str(), true);
+// PRD-compliant topic builders
+String MqttHandler::buildNodeTelemetryTopic(const String& nodeId) const {
+    return "site/" + siteId + "/node/" + nodeId + "/telemetry";
 }
 
-String MqttHandler::buildTopic(const char* suffix) const {
-    return String(BASE_TOPIC) + suffix;
+String MqttHandler::buildCoordTelemetryTopic() const {
+    return "site/" + siteId + "/coord/" + coordId + "/telemetry";
 }
 
-String MqttHandler::buildNodeTopic(const String& nodeId, const char* suffix) const {
-    return String(BASE_TOPIC) + "nodes/" + nodeId + "/" + suffix;
+String MqttHandler::buildMmWaveTopic() const {
+    return "site/" + siteId + "/coord/" + coordId + "/mmwave";
 }
 
-String MqttHandler::buildZoneTopic(const String& zoneId, const char* suffix) const {
-    return String(BASE_TOPIC) + "zones/" + zoneId + "/" + suffix;
+String MqttHandler::buildNodeCmdTopic(const String& nodeId) const {
+    return "site/" + siteId + "/node/" + nodeId + "/cmd";
+}
+
+String MqttHandler::buildCoordCmdTopic() const {
+    return "site/" + siteId + "/coord/" + coordId + "/cmd";
 }
 
 bool MqttHandler::reconnect() {
-    if (mqttClient.connect(WiFi.macAddress().c_str())) {
+    String clientId = "coord-" + coordId;
+    if (mqttClient.connect(clientId.c_str())) {
         subscribe();
         connected = true;
-        publishDiscovery();
+        // Publish initial telemetry on connect
+        StaticJsonDocument<256> telemetry;
+        telemetry["ts"] = millis() / 1000;
+        telemetry["fw"] = "1.0.0";
+        telemetry["coord_id"] = coordId;
+        telemetry["site_id"] = siteId;
+        publishCoordTelemetry(telemetry);
         return true;
     }
     return false;
 }
 
 void MqttHandler::subscribe() {
-    // Subscribe to command topics
-    mqttClient.subscribe((buildTopic("nodes/+/command")).c_str());
-    mqttClient.subscribe((buildTopic("zones/+/command")).c_str());
-    mqttClient.subscribe((buildTopic("system/command")).c_str());
-    mqttClient.subscribe((buildTopic("nodes/+/config/request")).c_str());
+    // Subscribe to command topics (PRD-compliant)
+    String coordCmdTopic = buildCoordCmdTopic();
+    mqttClient.subscribe(coordCmdTopic.c_str());
+    
+    // Subscribe to node commands with wildcard
+    String nodesCmdPattern = "site/" + siteId + "/node/+/cmd";
+    mqttClient.subscribe(nodesCmdPattern.c_str());
 }
 
 void MqttHandler::handleMessage(char* topic, uint8_t* payload, unsigned int length) {
@@ -150,28 +146,18 @@ void MqttHandler::handleMessage(char* topic, uint8_t* payload, unsigned int leng
         return;
     }
     
-    // Parse topic to determine message type
-    if (topicStr.startsWith(buildTopic("nodes/"))) {
-        String nodeId = topicStr.substring(
-            strlen(BASE_TOPIC) + 6, 
-            topicStr.lastIndexOf('/')
-        );
+    // Parse PRD-compliant topics: site/{siteId}/node/{nodeId}/cmd or site/{siteId}/coord/{coordId}/cmd
+    if (topicStr.startsWith("site/" + siteId + "/node/")) {
+        // Extract node ID from topic: site/{siteId}/node/{nodeId}/cmd
+        int nodeStart = topicStr.indexOf("/node/") + 6;
+        int nodeEnd = topicStr.indexOf("/", nodeStart);
+        if (nodeEnd == -1) nodeEnd = topicStr.length();
+        String nodeId = topicStr.substring(nodeStart, nodeEnd);
         
-        if (topicStr.endsWith("/command") && nodeCommandCallback) {
+        if (topicStr.endsWith("/cmd") && nodeCommandCallback) {
             nodeCommandCallback(nodeId, doc);
-        } else if (topicStr.endsWith("/config/request") && configCallback) {
-            configCallback(nodeId, doc);
         }
-    } else if (topicStr.startsWith(buildTopic("zones/"))) {
-        String zoneId = topicStr.substring(
-            strlen(BASE_TOPIC) + 6, 
-            topicStr.lastIndexOf('/')
-        );
-        
-        if (topicStr.endsWith("/command") && zoneCommandCallback) {
-            zoneCommandCallback(zoneId, doc);
-        }
-    } else if (topicStr == buildTopic("system/command") && systemCommandCallback) {
-        systemCommandCallback(topicStr, doc);
+    } else if (topicStr == buildCoordCmdTopic() && coordCommandCallback) {
+        coordCommandCallback(topicStr, doc);
     }
 }

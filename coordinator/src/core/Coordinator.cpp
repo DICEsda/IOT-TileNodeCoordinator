@@ -56,6 +56,13 @@ bool Coordinator::begin() {
         }
     });
 
+    // Register send error callback for visual feedback
+    espNow->setSendErrorCallback([this](const String& nodeId) {
+        // Flash red on all LEDs to indicate send failure
+        statusLed.pulse(180, 0, 0, 200); // Red flash for 200ms
+        Logger::warn("ESP-NOW send failed to node %s - showing red flash", nodeId.c_str());
+    });
+    
     // Register pairing callback to handle join requests coming from nodes
     espNow->setPairingCallback([this](const uint8_t* mac, const uint8_t* data, size_t len) {
         if (!mac || !data || len == 0) {
@@ -86,20 +93,22 @@ bool Coordinator::begin() {
             return;
         }
 
-        // Add as ESP-NOW peer (unencrypted)
-        if (!espNow->addPeer(mac)) {
-            Logger::error("Failed to add ESP-NOW peer for %s", macStr);
-        }
+        // Add as ESP-NOW peer (unencrypted) - this now handles duplicates gracefully
+        espNow->addPeer(mac);
 
         JoinAcceptMessage accept;
         accept.node_id = nodeId;
         accept.light_id = nodes->getLightForNode(nodeId);
         accept.lmk = ""; // Unencrypted for now
+        accept.cfg.pwm_freq = 0; // Not used but set explicitly
         accept.cfg.rx_window_ms = 20;
         accept.cfg.rx_period_ms = 100;
         String json = accept.toJson();
+        
+        // Debug: log the message we're sending
+        Logger::info("JOIN_ACCEPT message (%d bytes): %s", json.length(), json.c_str());
 
-        // send back to node mac
+        // send back to node mac (will auto-add peer if missing)
         if (!espNow->sendToMac(mac, json)) {
             Logger::warn("Failed to send join_accept to %s", macStr);
         } else {
@@ -107,11 +116,15 @@ bool Coordinator::begin() {
         }
 
         // Assign LED and give brief green flash for connection feedback
-    int idx = assignGroupForNode(nodeId);
-    if (idx >= 0) {
-        groupConnected[idx] = true; // mark active connection
-        flashLedForNode(nodeId, 200);
-    }
+        int idx = assignGroupForNode(nodeId);
+        if (idx >= 0) {
+            groupConnected[idx] = true; // mark active connection
+            flashLedForNode(nodeId, 400); // Longer flash for pairing success
+        }
+        
+        // Show "OK" confirmation: all LEDs green pulse for 300ms
+        statusLed.pulse(0, 150, 0, 300); // Green confirmation flash
+        Logger::info("Pairing successful - OK confirmation shown");
     });
 
     Logger::info("Initializing MQTT...");
@@ -188,7 +201,27 @@ bool Coordinator::begin() {
     });
     
     buttons->setLongPressCallback([this]() {
-        this->triggerNodeWaveTest();
+        // Long press: flash all connected nodes on white channel while held
+        this->longPressActive = true;
+        this->startFlashAll();
+    });
+    
+    buttons->setVeryLongPressCallback([this]() {
+        // Very long press (10s): clear all known nodes
+        Logger::info("===========================================");
+        Logger::info("CLEARING ALL NODES (10s hold detected)");
+        Logger::info("===========================================");
+        if (nodes) {
+            nodes->clearAllNodes();
+        }
+        if (espNow) {
+            espNow->clearAllPeers(); // Clear ESP-NOW peers
+        }
+        // Rebuild LED mapping to clear visual indicators
+        rebuildLedMappingFromRegistry();
+        updateLeds();
+        Logger::info("All nodes cleared. Release button to continue.");
+        Logger::info("===========================================");
     });
 
 Logger::info("Coordinator initialization complete");
@@ -212,6 +245,11 @@ void Coordinator::loop() {
     
     // Update status LED pulse (pairing) if active
     statusLed.loop();
+
+    // While flashing mode is active and button is held, tick the flash
+    if (flashAllActive && buttonDown) {
+        flashAllTick(millis());
+    }
 
     // Always update per-node LEDs (show connection state)
     if (!statusLed.isPulsing()) {
@@ -284,15 +322,34 @@ void Coordinator::onButtonEvent(const String& buttonId, bool pressed) {
         Logger::error("Cannot process button event: components not initialized");
         return;
     }
-    
-    // Short press opens a pairing window; release does nothing special
+
     if (pressed) {
-        Logger::info("Pairing button pressed - opening pairing window");
-        const uint32_t windowMs = 60000; // 60s pairing window
-        nodes->startPairing(windowMs);
-        espNow->enablePairingMode(windowMs);
-        Logger::info("Pairing window open for %d ms", windowMs);
+        // Begin press: track state, do not enter pairing yet
+        buttonDown = true;
+        buttonPressedAt = millis();
+        longPressActive = false;
+        return;
     }
+
+    // On release
+    buttonDown = false;
+    if (longPressActive) {
+        // Stop flashing and suppress pairing
+        stopFlashAll();
+        longPressActive = false;
+        return;
+    }
+
+    // Treat as short press -> open pairing window
+    Logger::info("Pairing button short press - opening pairing window");
+    const uint32_t windowMs = 60000; // 60s pairing window
+    nodes->startPairing(windowMs);
+    espNow->enablePairingMode(windowMs);
+    
+    // Visual feedback: blue pulse to indicate pairing mode active
+    statusLed.pulse(0, 0, 180, 500); // Blue pulse
+    
+    Logger::info("Pairing window open for %d ms", windowMs);
 }
 
 void Coordinator::handleNodeMessage(const String& nodeId, const uint8_t* data, size_t len) {
@@ -300,16 +357,52 @@ void Coordinator::handleNodeMessage(const String& nodeId, const uint8_t* data, s
     String payload((const char*)data, len);
     MessageType mt = MessageFactory::getMessageType(payload);
 
-    // Ensure we have a group assigned for this node
-    int idx = getGroupIndexForNode(nodeId);
-    if (idx < 0) idx = assignGroupForNode(nodeId);
-    if (idx >= 0) {
-        groupConnected[idx] = true; // mark as active connection
-        flashLedForNode(nodeId, 150); // brief activity flash on each message
+    // Re-accept known node JOIN_REQUEST even if pairing window is closed
+    if (mt == MessageType::JOIN_REQUEST && nodes) {
+        // nodeId is the MAC string
+        String existingLight = nodes->getLightForNode(nodeId);
+        if (existingLight.length() > 0 || nodes->getNodeStatus(nodeId).nodeId.length() > 0) {
+            // Known node: respond with join_accept
+            uint8_t mac[6];
+            if (EspNow::macStringToBytes(nodeId, mac)) {
+                espNow->addPeer(mac);
+            }
+            JoinAcceptMessage accept;
+            accept.node_id = nodeId;
+            accept.light_id = nodes->getLightForNode(nodeId);
+            accept.lmk = "";
+            accept.cfg.rx_window_ms = 20;
+            accept.cfg.rx_period_ms = 100;
+            String json = accept.toJson();
+            // Parse MAC for send
+            uint8_t mac2[6];
+            if (EspNow::macStringToBytes(nodeId, mac2)) {
+                if (!espNow->sendToMac(mac2, json)) {
+                    Logger::warn("Failed to send re-join_accept to %s", nodeId.c_str());
+                } else {
+                    Logger::info("Re-accepted known node %s", nodeId.c_str());
+                }
+            }
+        }
     }
-    // Update last-seen for any message
+
+    // Update last-seen for any message first
     if (nodes) {
         nodes->updateNodeStatus(nodeId, 0);
+    }
+    
+    // Ensure we have a group assigned for this node
+    int idx = getGroupIndexForNode(nodeId);
+    if (idx < 0) {
+        idx = assignGroupForNode(nodeId);
+        Logger::info("Assigned group %d to node %s", idx + 1, nodeId.c_str());
+    }
+    if (idx >= 0) {
+        if (!groupConnected[idx]) {
+            Logger::info("[Node %d] %s CONNECTED", idx + 1, nodeId.c_str());
+        }
+        groupConnected[idx] = true; // mark as active connection
+        flashLedForNode(nodeId, 150); // brief activity flash on each message
     }
 
     // Improved logging per node index with MAC
@@ -319,9 +412,30 @@ void Coordinator::handleNodeMessage(const String& nodeId, const uint8_t* data, s
                  mt == MessageType::NODE_STATUS ? "STATUS" : "MESSAGE", 
                  (int)len);
 
-    // Mark last seen on status
+    // Mark last seen on status and log sensor data
     if (mt == MessageType::NODE_STATUS && nodes) {
         nodes->updateNodeStatus(nodeId, 0);
+        
+        // Parse and log sensor data from telemetry
+        EspNowMessage* msg = MessageFactory::createMessage(payload);
+        if (msg && msg->type == MessageType::NODE_STATUS) {
+            NodeStatusMessage* statusMsg = static_cast<NodeStatusMessage*>(msg);
+            
+            // Log temperature if available
+            if (statusMsg->temperature > -50.0f && statusMsg->temperature < 150.0f) {
+                Logger::info("  [Node %d] Temperature: %.2f°C", 
+                             idx >= 0 ? idx + 1 : 0, 
+                             statusMsg->temperature);
+            }
+            
+            // Log button state
+            Logger::info("  [Node %d] Button: %s, RGBW: (%d,%d,%d,%d)", 
+                         idx >= 0 ? idx + 1 : 0,
+                         statusMsg->button_pressed ? "PRESSED" : "Released",
+                         statusMsg->avg_r, statusMsg->avg_g, statusMsg->avg_b, statusMsg->avg_w);
+            
+            delete msg;
+        }
     }
 }
 
@@ -338,11 +452,13 @@ void Coordinator::rebuildLedMappingFromRegistry() {
     std::sort(list.begin(), list.end(), [](const NodeInfo& a, const NodeInfo& b){ return a.nodeId < b.nodeId; });
     int maxGroups = Pins::RgbLed::NUM_PIXELS / 4;
     int idx = 0;
+    uint32_t now = millis();
     for (const auto& n : list) {
         if (idx >= maxGroups) break;
         nodeToGroup[n.nodeId] = idx;
         groupToNode[idx] = n.nodeId;
-        groupConnected[idx] = false;
+        // Mark as connected if recently seen (within last 6 seconds)
+        groupConnected[idx] = (n.lastSeenMs > 0 && (now - n.lastSeenMs) <= 6000U);
         idx++;
     }
 }
@@ -382,15 +498,15 @@ void Coordinator::updateLeds() {
     for (int g = 0; g < groupCount; ++g) {
         uint8_t r=0,gc=0,b=0;
         if (groupFlashUntilMs[g] > now) {
-            // Bright green flash (activity)
-            r=0; gc=255; b=0;
+            // Bright green flash (activity) at 50%
+            r=0; gc=128; b=0;
         } else if (groupToNode[g].length() > 0) {
             if (groupConnected[g]) {
-                // Solid green (dim)
-                r=0; gc=90; b=0;
+                // Solid green (dim) at 50%
+                r=0; gc=45; b=0;
             } else {
-                // Red for disconnected/stale node
-                r=180; gc=0; b=0;
+                // Red for disconnected/stale node at 50%
+                r=90; gc=0; b=0;
             }
         } else {
             r=0; gc=0; b=0;
@@ -455,6 +571,52 @@ void Coordinator::sendHealthPings() {
         if (!EspNow::macStringToBytes(groupToNode[g], mac)) continue;
         const String ping = "{\"msg\":\"ping\"}";
         espNow->sendToMac(mac, ping);
+    }
+}
+
+void Coordinator::startFlashAll() {
+    // Build list of connected nodes
+    if (!nodes || !espNow) return;
+    auto all = nodes->getAllNodes();
+    bool any = false;
+    for (const auto& n : all) {
+        int gi = getGroupIndexForNode(n.nodeId);
+        if (gi >= 0 && groupConnected[gi]) { any = true; break; }
+    }
+    if (!any) {
+        Logger::info("No connected nodes - flash-all suppressed");
+        flashAllActive = false;
+        return;
+    }
+    flashAllActive = true;
+    flashOn = false; // will toggle to ON on first tick
+    lastFlashTick = 0;
+    Logger::info("Flash-all: ACTIVE (hold button to keep flashing)");
+    // trigger first tick immediately for instant feedback
+    flashAllTick(millis());
+}
+
+void Coordinator::stopFlashAll() {
+    flashAllActive = false;
+    flashOn = false;
+    lastFlashTick = 0;
+    Logger::info("Flash-all: STOPPED");
+}
+
+void Coordinator::flashAllTick(uint32_t now) {
+    const uint32_t intervalMs = 350; // toggle cadence
+    if (now - lastFlashTick < intervalMs) return;
+    lastFlashTick = now;
+    flashOn = !flashOn;
+
+    // Send white on/off to all connected nodes with short TTL and override_status
+    auto all = nodes->getAllNodes();
+    for (const auto& n : all) {
+        int gi = getGroupIndexForNode(n.nodeId);
+        if (gi < 0 || !groupConnected[gi]) continue;
+        uint8_t level = flashOn ? 128 : 0; // 50% brightness
+        // quick fade for nicer blink
+        espNow->sendLightCommand(n.nodeId, level, 60 /*fadeMs*/, true /*override*/, 500 /*ttl*/);
     }
 }
 

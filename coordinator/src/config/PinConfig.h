@@ -14,8 +14,8 @@ namespace Pins {
     constexpr uint8_t STATUS_G = 0;
     constexpr uint8_t STATUS_B = 0;
     
-    // Button Input (external physical button labeled "node button")
-    constexpr uint8_t PAIRING_BUTTON = 42;    // External button connected to GPIO0 (BOOT button)
+    // Button Input (physical button). Default to BOOT button (GPIO0) with internal pull-up.
+    constexpr uint8_t PAIRING_BUTTON = 0;     // Change here if using another GPIO for the button
     
     // Optional External Sensors
     namespace External {

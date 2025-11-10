@@ -18,6 +18,7 @@ public:
     // Node registration
     bool registerNode(const String& nodeId, const String& lightId);
     bool unregisterNode(const String& nodeId);
+    void clearAllNodes();
     
     // Pairing
     void startPairing(uint32_t durationMs = 30000);

@@ -1,0 +1,11 @@
+server:
+  addr: ":8000"
+
+mqtt:
+  broker: "tcp://localhost:1883"
+  username: "user1"
+  password: "user1"
+
+db:
+  uri: "mongodb://localhost:27017"
+  database: "iot_smarttile"

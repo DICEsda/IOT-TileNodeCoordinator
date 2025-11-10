@@ -14,8 +14,9 @@ String JoinRequestMessage::toJson() const {
 	doc["fw"] = fw;
 	doc["caps"]["rgbw"] = caps.rgbw;
 	doc["caps"]["led_count"] = caps.led_count;
-	doc["caps"]["temp_spi"] = caps.temp_spi;
+	doc["caps"]["temp_i2c"] = caps.temp_i2c;
 	doc["caps"]["deep_sleep"] = caps.deep_sleep;
+	doc["caps"]["button"] = caps.button;
 	doc["token"] = token;
 	String out; serializeJson(doc, out); return out;
 }
@@ -29,8 +30,9 @@ bool JoinRequestMessage::fromJson(const String& json) {
 	fw = doc["fw"].as<String>();
 	caps.rgbw = doc["caps"]["rgbw"].as<bool>();
 	caps.led_count = doc["caps"]["led_count"].as<uint8_t>();
-	caps.temp_spi = doc["caps"]["temp_spi"].as<bool>();
+	caps.temp_i2c = doc["caps"]["temp_i2c"] | false;
 	caps.deep_sleep = doc["caps"]["deep_sleep"].as<bool>();
+	caps.button = doc["caps"]["button"] | false;
 	token = doc["token"].as<String>();
 	return true;
 }
@@ -40,6 +42,10 @@ JoinAcceptMessage::JoinAcceptMessage() {
 	type = MessageType::JOIN_ACCEPT;
 	msg = "join_accept";
 	ts = millis();
+	// Initialize config struct with defaults
+	cfg.pwm_freq = 0;
+	cfg.rx_window_ms = 20;
+	cfg.rx_period_ms = 100;
 }
 
 String JoinAcceptMessage::toJson() const {
@@ -55,9 +61,12 @@ String JoinAcceptMessage::toJson() const {
 }
 
 bool JoinAcceptMessage::fromJson(const String& json) {
-	DynamicJsonDocument doc(256);
+	DynamicJsonDocument doc(512); // Increased from 256 to handle nested objects
 	DeserializationError err = deserializeJson(doc, json);
-	if (err) return false;
+	if (err) {
+		Serial.printf("JSON parse error: %s\n", err.c_str());
+		return false;
+	}
 	msg = doc["msg"].as<String>();
 	node_id = doc["node_id"].as<String>();
 	light_id = doc["light_id"].as<String>();
@@ -127,6 +136,8 @@ String NodeStatusMessage::toJson() const {
 	doc["avg_w"] = avg_w;
 	doc["status_mode"] = status_mode;
 	doc["vbat_mv"] = vbat_mv;
+	doc["temperature"] = temperature;
+	doc["button_pressed"] = button_pressed;
 	doc["fw"] = fw;
 	doc["ts"] = ts;
 	String out; serializeJson(doc, out); return out;
@@ -146,6 +157,8 @@ bool NodeStatusMessage::fromJson(const String& json) {
 	avg_w = doc.containsKey("avg_w") ? doc["avg_w"].as<uint8_t>() : 0;
 	status_mode = doc["status_mode"].as<String>();
 	vbat_mv = doc.containsKey("vbat_mv") ? doc["vbat_mv"].as<uint16_t>() : 0;
+	temperature = doc.containsKey("temperature") ? doc["temperature"].as<float>() : 0.0f;
+	button_pressed = doc.containsKey("button_pressed") ? doc["button_pressed"].as<bool>() : false;
 	fw = doc["fw"].as<String>();
 	ts = doc.containsKey("ts") ? doc["ts"].as<uint32_t>() : millis();
 	return true;

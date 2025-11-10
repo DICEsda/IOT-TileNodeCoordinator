@@ -33,8 +33,9 @@ struct JoinRequestMessage : public EspNowMessage {
 	struct Capabilities {
 		bool rgbw;         // SK6812B RGBW support
 		uint8_t led_count; // pixels per node (default 4)
-		bool temp_spi;     // local temp sensor via SPI
+		bool temp_i2c;     // TMP177 temp sensor via I2C
 		bool deep_sleep;   // deep sleep capable
+		bool button;       // button input available
 	} caps;
 	String token;          // rotating token for secure pairing
 
@@ -83,6 +84,8 @@ struct NodeStatusMessage : public EspNowMessage {
 	uint8_t avg_r = 0, avg_g = 0, avg_b = 0, avg_w = 0;
 	String status_mode;   // "operational", "pairing", "ota", "error"
 	uint16_t vbat_mv = 0;
+	float temperature = 0.0f; // temperature in Celsius from TMP177
+	bool button_pressed = false; // current button state
 	String fw;
 
 	NodeStatusMessage();

@@ -16,30 +16,35 @@ public:
     ~MqttHandler();
 
     bool begin(const char* broker, uint16_t port, 
-               const char* username, const char* password);
+               const char* username, const char* password,
+               const String& siteId, const String& coordId);
     void loop();
     
-    // State Publishing
-    void publishNodeState(const String& nodeId, const NodeInfo& state);
-    void publishNodeTemperature(const String& nodeId, float temperature);
-    void publishZoneState(const String& zoneId, bool presence);
-    void publishSystemStatus();
+    // Site/Coordinator Configuration
+    void setSiteId(const String& siteId) { this->siteId = siteId; }
+    void setCoordId(const String& coordId) { this->coordId = coordId; }
+    String getSiteId() const { return siteId; }
+    String getCoordId() const { return coordId; }
+    
+    // State Publishing (PRD-compliant)
+    void publishNodeTelemetry(const String& nodeId, const JsonDocument& telemetry);
+    void publishCoordTelemetry(const JsonDocument& telemetry);
+    void publishMmWaveEvent(const JsonDocument& event);
     
     // Command Registration
     void onNodeCommand(CommandCallback callback);
-    void onZoneCommand(CommandCallback callback);
-    void onSystemCommand(CommandCallback callback);
+    void onCoordCommand(CommandCallback callback);
     
     // Configuration
     void publishConfig(const String& nodeId, const JsonDocument& config);
     void onConfigRequest(CommandCallback callback);
     
-    // Discovery
-    void publishDiscovery();
-    
 private:
+    // Site and Coordinator IDs
+    String siteId;
+    String coordId;
+    
     // Constants
-    static constexpr const char* BASE_TOPIC = "smart_tile/";
     static constexpr size_t JSON_CAPACITY = 1024;
     
     // MQTT Client
@@ -48,18 +53,19 @@ private:
     
     // Callbacks
     CommandCallback nodeCommandCallback;
-    CommandCallback zoneCommandCallback;
-    CommandCallback systemCommandCallback;
+    CommandCallback coordCommandCallback;
     CommandCallback configCallback;
     
     // State tracking
     bool connected;
     uint32_t lastReconnectAttempt;
     
-    // Helper methods
-    String buildTopic(const char* suffix) const;
-    String buildNodeTopic(const String& nodeId, const char* suffix) const;
-    String buildZoneTopic(const String& zoneId, const char* suffix) const;
+    // Helper methods - PRD-compliant topic builders
+    String buildNodeTelemetryTopic(const String& nodeId) const;
+    String buildCoordTelemetryTopic() const;
+    String buildMmWaveTopic() const;
+    String buildNodeCmdTopic(const String& nodeId) const;
+    String buildCoordCmdTopic() const;
     
     bool reconnect();
     void handleMessage(char* topic, uint8_t* payload, unsigned int length);
@@ -67,6 +73,5 @@ private:
     
     // Message processing
     void processNodeCommand(const String& nodeId, const JsonDocument& payload);
-    void processZoneCommand(const String& zoneId, const JsonDocument& payload);
-    void processSystemCommand(const JsonDocument& payload);
+    void processCoordCommand(const JsonDocument& payload);
 };
