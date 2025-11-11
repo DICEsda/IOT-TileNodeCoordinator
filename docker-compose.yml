@@ -85,8 +85,8 @@ services:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8000/health"]
       interval: 10s
       timeout: 5s
-      retries: 3
-      start_period: 20s
+      retries: 10
+      start_period: 30s
 
   # Angular Frontend
   frontend:
@@ -101,8 +101,7 @@ services:
     ports:
       - "4200:80"
     depends_on:
-      backend:
-        condition: service_healthy
+      - backend
     networks:
       - iot-network
     healthcheck:

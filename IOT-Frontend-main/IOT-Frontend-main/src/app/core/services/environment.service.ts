@@ -11,11 +11,13 @@ import { Injectable } from '@angular/core';
 export class EnvironmentService {
   private readonly config = {
     // Backend API configuration
-    apiUrl: this.getEnvVar('API_URL', 'http://localhost:8080/api/v1'),
-    wsUrl: this.getEnvVar('WS_URL', 'ws://localhost:8080/ws'),
+    // Default adjusted to backend exposed port 8000 and root path (health is at /health)
+    // If your backend actually namespaces under /api/v1, override via window.env.API_URL
+    apiUrl: this.getEnvVar('API_URL', 'http://localhost:8000'),
+    wsUrl: this.getEnvVar('WS_URL', 'ws://localhost:8000/ws'),
     
     // MQTT WebSocket configuration (via backend proxy)
-    mqttWsUrl: this.getEnvVar('MQTT_WS_URL', 'ws://localhost:8080/mqtt'),
+  mqttWsUrl: this.getEnvVar('MQTT_WS_URL', 'ws://localhost:8000/mqtt'),
     
     // Feature flags
     enableGoogleHome: this.getEnvVar('ENABLE_GOOGLE_HOME', 'false') === 'true',

@@ -15,6 +15,7 @@ interface ConnectionStatus {
   lastUpdate: Date;
   details?: string;
   latency?: number;
+  extra?: Record<string, any>;
 }
 
 interface TelemetryMessage {
@@ -22,6 +23,15 @@ interface TelemetryMessage {
   topic: string;
   source: 'MQTT' | 'WebSocket' | 'HTTP';
   payload: any;
+}
+
+interface SystemHealthAggregate {
+  backend?: any;
+  database?: { connected: boolean; latency?: number; details?: string };
+  mqtt?: { connected: boolean; details?: string };
+  coordinator?: any;
+  nodes?: any[];
+  timestamp: Date;
 }
 
 @Component({
@@ -100,29 +110,71 @@ interface TelemetryMessage {
         </div>
       </div>
 
-      <!-- API Health Check -->
+      <!-- System Health Aggregate -->
       <div class="debug-section">
-        <h2>🏥 Backend Health</h2>
-        <div class="health-container">
-          @if (healthStatus(); as health) {
-            <div class="health-card" [attr.data-healthy]="health.status === 'ok'">
-              <div class="health-row">
-                <span>Status:</span>
-                <span class="health-badge" [attr.data-status]="health.status">
-                  {{ health.status === 'ok' ? '✅ Healthy' : '❌ Unhealthy' }}
-                </span>
+        <h2>🏥 System Health</h2>
+        <div class="health-grid">
+          <div class="health-group">
+            <h3>Backend</h3>
+            @if (healthStatus(); as health) {
+              <div class="health-card" [attr.data-healthy]="health.status === 'ok'">
+                <div class="health-row"><span>Status:</span><span class="health-badge" [attr.data-status]="health.status">{{ health.status === 'ok' ? '✅ Healthy' : '❌ Unhealthy' }}</span></div>
+                <div class="health-row"><span>Uptime:</span><span>{{ health.uptime || 'N/A' }}</span></div>
               </div>
-              <div class="health-row">
-                <span>Uptime:</span>
-                <span>{{ health.uptime || 'N/A' }}</span>
+            } @else {
+              <div class="health-card" data-healthy="false"><p>❌ Unreachable</p><button (click)="checkHealth()" class="btn btn-small">Retry</button></div>
+            }
+          </div>
+          <div class="health-group">
+            <h3>Database (MongoDB)</h3>
+            @if (systemAggregate(); let agg) {
+              <div class="health-card" [attr.data-healthy]="agg.database?.connected">
+                <div class="health-row"><span>Status:</span><span>{{ agg.database?.connected ? '✅ Connected' : '❌ Unreachable' }}</span></div>
+                <div class="health-row"><span>Latency:</span><span>{{ agg.database?.latency ?? 'N/A' }}ms</span></div>
+                <div class="health-row" *ngIf="agg.database?.details"><span>Details:</span><span>{{ agg.database?.details }}</span></div>
               </div>
+            } @else {
+              <div class="health-card" data-healthy="false"><p>Loading...</p></div>
+            }
+          </div>
+          <div class="health-group">
+            <h3>MQTT Broker</h3>
+            @if (systemAggregate(); let agg) {
+              <div class="health-card" [attr.data-healthy]="agg.mqtt?.connected">
+                <div class="health-row"><span>Status:</span><span>{{ agg.mqtt?.connected ? '✅ Connected' : '❌ Unreachable' }}</span></div>
+                <div class="health-row" *ngIf="agg.mqtt?.details"><span>Endpoint:</span><span>{{ agg.mqtt?.details }}</span></div>
+              </div>
+            } @else {<div class="health-card" data-healthy="false"><p>Loading...</p></div>}
+          </div>
+          <div class="health-group">
+            <h3>Coordinator</h3>
+            @if (systemAggregate()?.coordinator; let coord) {
+              <div class="health-card" data-healthy="true">
+                <div class="health-row"><span>ID:</span><span>{{ coord.id || 'N/A' }}</span></div>
+                <div class="health-row"><span>Status:</span><span>{{ coord.status || 'N/A' }}</span></div>
+              </div>
+            } @else {
+              <div class="health-card" data-healthy="false"><p>No data</p></div>
+            }
+          </div>
+            <div class="health-group">
+              <h3>Nodes</h3>
+              @if (systemAggregate()?.nodes?.length) {
+                <div class="node-list">
+                  @for (n of systemAggregate()!.nodes; track n.id) {
+                    <div class="node-item" [attr.data-status]="n.status || 'unknown'">
+                      <span>{{ n.id }}</span>
+                      <small>{{ n.status || 'unknown' }}</small>
+                    </div>
+                  }
+                </div>
+              } @else {
+                <div class="health-card" data-healthy="false"><p>No nodes</p></div>
+              }
             </div>
-          } @else {
-            <div class="health-card" data-healthy="false">
-              <p>❌ Unable to fetch health status</p>
-              <button (click)="checkHealth()" class="btn btn-small">Retry</button>
-            </div>
-          }
+        </div>
+        <div class="health-actions">
+          <button class="btn btn-small" (click)="refreshAggregate()">🔄 Refresh Aggregate</button>
         </div>
       </div>
 
@@ -537,6 +589,7 @@ export class DebugComponent implements OnInit, OnDestroy {
   telemetryMessages = signal<TelemetryMessage[]>([]);
   mqttTestLog = signal<string[]>([]);
   monitoring = signal(false);
+  systemAggregate = signal<SystemHealthAggregate | null>(null);
   
   testTopic = 'site/site001/coord/+/telemetry';
 
@@ -556,6 +609,7 @@ export class DebugComponent implements OnInit, OnDestroy {
   ngOnInit() {
     this.checkAllConnections();
     this.checkHealth();
+    this.refreshAggregate();
     this.setupAutoRefresh();
   }
 
@@ -630,6 +684,28 @@ export class DebugComponent implements OnInit, OnDestroy {
     }
   }
 
+  async refreshAggregate() {
+    const aggregate: SystemHealthAggregate = { timestamp: new Date() } as any;
+    aggregate.backend = this.healthStatus();
+    try {
+      const start = performance.now();
+      const sites = await firstValueFrom(this.apiService.getSites());
+      aggregate.database = { connected: true, latency: Math.round(performance.now() - start), details: `Sites: ${sites.length}` };
+    } catch (e: any) {
+      aggregate.database = { connected: false, details: e.message };
+    }
+    aggregate.mqtt = { connected: this.mqttService.connected(), details: this.environment.mqttWsUrl };
+    try {
+      const coord = await firstValueFrom(this.apiService.getCoordinatorById('coord001'));
+      aggregate.coordinator = coord;
+    } catch { aggregate.coordinator = null; }
+    try {
+      const node = await firstValueFrom(this.apiService.getNodeById('node001'));
+      aggregate.nodes = [node];
+    } catch { aggregate.nodes = []; }
+    this.systemAggregate.set(aggregate);
+  }
+
   startMonitoring() {
     this.monitoring.set(true);
     
@@ -698,6 +774,7 @@ export class DebugComponent implements OnInit, OnDestroy {
   refreshAll() {
     this.checkAllConnections();
     this.checkHealth();
+    this.refreshAggregate();
   }
 
   clearTelemetry() {

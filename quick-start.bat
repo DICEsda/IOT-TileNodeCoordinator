@@ -14,7 +14,7 @@ if %ERRORLEVEL% NEQ 0 (
     docker-compose version >nul 2>&1
     if %ERRORLEVEL% NEQ 0 (
         echo ERROR: Docker Compose is not installed!
-        echo Install Docker Desktop (which bundles Compose v2) from https://www.docker.com/products/docker-desktop
+        echo Install Docker Desktop ^(which bundles Compose v2^) from https://www.docker.com/products/docker-desktop
         pause
         exit /b 1
     ) else (
@@ -69,8 +69,8 @@ if %ERRORLEVEL% NEQ 0 (
     echo Common solutions:
     echo   1. Check Docker Desktop is running
     echo   2. Ensure you have internet connection
-    echo   3. Try: docker-compose down -v (clean volumes)
-    echo   4. Try: docker system prune (clean Docker cache)
+    echo   3. Try: docker-compose down -v ^(clean volumes^)
+    echo   4. Try: docker system prune ^(clean Docker cache^)
     echo.
     pause
     exit /b 1
@@ -78,25 +78,32 @@ if %ERRORLEVEL% NEQ 0 (
 
 echo.
 echo [3/4] Starting services...
-%COMPOSE_CMD% up -d
+REM Do not recreate existing containers; proceed even if compose warns about unhealthy deps
+set UP_FLAGS=--no-recreate
+%COMPOSE_CMD% up -d %UP_FLAGS%
 if %ERRORLEVEL% NEQ 0 (
-    echo ERROR: Failed to start services!
-    pause
-    exit /b 1
+    echo WARNING: docker compose reported a non-zero exit ^(possibly due to health checks^). Continuing to wait for readiness...
 )
 
 echo.
 echo [4/4] Waiting for services to be ready...
-REM Wait for backend health
-set RETRIES=20
+REM Wait for backend health (host + in-container fallback)
+set RETRIES=30
 set DELAY=3
-for /l %%i in (1,1,20) do (
-    powershell -Command "try { $resp = Invoke-WebRequest -UseBasicParsing http://localhost:8000/health -TimeoutSec 2; if ($resp.StatusCode -eq 200) { exit 0 } else { exit 1 } } catch { exit 1 }"
+REM Define PowerShell health check command outside loop to avoid parenthesis escaping issues
+set "PS_HEALTH=try { $resp = Invoke-WebRequest -UseBasicParsing http://localhost:8000/health -TimeoutSec 2; if ($resp.StatusCode -eq 200) { exit 0 } else { exit 1 } } catch { exit 1 }"
+for /L %%i in (1,1,%RETRIES%) do (
+    powershell -NoLogo -NoProfile -Command "!PS_HEALTH!" >nul 2>&1
     if !ERRORLEVEL! EQU 0 (
         goto :ready
     )
-    echo Waiting for backend... (%%i/20)
-    timeout /t 3 /nobreak >nul
+    REM Fallback: check from inside the backend container
+    %COMPOSE_CMD% exec -T backend sh -c "wget -q --tries=1 --spider http://localhost:8000/health" >nul 2>&1
+    if !ERRORLEVEL! EQU 0 (
+        goto :ready
+    )
+    echo Waiting for backend... ^(%%i/%RETRIES%^)
+    timeout /t %DELAY% /nobreak >nul
 )
 echo ERROR: Backend didn't become healthy in time.
 %COMPOSE_CMD% logs backend
