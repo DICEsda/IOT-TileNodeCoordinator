@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/DICEsda/IOT-TileNodeCoordinator/backend/internal/types"
 	"go.mongodb.org/mongo-driver/bson"
@@ -145,4 +146,42 @@ func (r *MongoRepository) CreateSite(ctx context.Context, site *types.Site) erro
 		return err
 	}
 	return nil
+}
+
+func (r *MongoRepository) InsertMmwaveFrame(ctx context.Context, frame *types.MmwaveFrame) error {
+	coll := r.db.Collection("mmwave_frames")
+	if frame.Timestamp.IsZero() {
+		frame.Timestamp = time.Now().UTC()
+	}
+	if _, err := coll.InsertOne(ctx, frame); err != nil {
+		r.logger.Error("Failed to insert mmWave frame", zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+func (r *MongoRepository) GetMmwaveFrames(ctx context.Context, siteId string, coordinatorId string, limit int) ([]types.MmwaveFrame, error) {
+	coll := r.db.Collection("mmwave_frames")
+	filter := bson.M{}
+	if siteId != "" {
+		filter["site_id"] = siteId
+	}
+	if coordinatorId != "" {
+		filter["coordinator_id"] = coordinatorId
+	}
+	opts := options.Find().SetSort(bson.M{"timestamp": -1})
+	if limit > 0 {
+		opts.SetLimit(int64(limit))
+	}
+	cursor, err := coll.Find(ctx, filter, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	var frames []types.MmwaveFrame
+	if err := cursor.All(ctx, &frames); err != nil {
+		return nil, err
+	}
+	return frames, nil
 }

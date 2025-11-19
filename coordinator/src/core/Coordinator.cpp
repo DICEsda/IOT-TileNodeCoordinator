@@ -1,7 +1,13 @@
 #include "Coordinator.h"
 #include "../utils/Logger.h"
 #include "../../shared/src/EspNowMessage.h"
+#include "../comm/WifiManager.h"
+#include "../sensors/AmbientLightSensor.h"
 #include <algorithm>
+#include <ArduinoJson.h>
+#if defined(ARDUINO_ARCH_ESP32)
+#include <esp32-hal.h>
+#endif
 
 Coordinator::Coordinator()
     : espNow(nullptr)
@@ -10,7 +16,9 @@ Coordinator::Coordinator()
     , nodes(nullptr)
     , zones(nullptr)
     , buttons(nullptr)
-    , thermal(nullptr) {}
+    , thermal(nullptr)
+    , wifi(nullptr)
+    , ambientLight(nullptr) {}
 
 
 Coordinator::~Coordinator() {
@@ -20,7 +28,9 @@ Coordinator::~Coordinator() {
     if (zones) { delete zones; zones = nullptr; }
     if (nodes) { delete nodes; nodes = nullptr; }
     if (mmWave) { delete mmWave; mmWave = nullptr; }
+    if (ambientLight) { delete ambientLight; ambientLight = nullptr; }
     if (mqtt) { delete mqtt; mqtt = nullptr; }
+    if (wifi) { delete wifi; wifi = nullptr; }
     if (espNow) { delete espNow; espNow = nullptr; }
 }
 
@@ -28,6 +38,7 @@ bool Coordinator::begin() {
     // Don't call Logger::begin here - it's already called in main.cpp
     Logger::setMinLevel(Logger::INFO); // Reduce noise: default to INFO
     delay(500);
+    bootStatus.clear();
     
     Logger::info("Smart Tile Coordinator starting...");
 
@@ -38,12 +49,34 @@ bool Coordinator::begin() {
     zones = new ZoneControl();
     buttons = new ButtonControl();
     thermal = new ThermalControl();
+    wifi = new WifiManager();
+    ambientLight = new AmbientLightSensor();
 
     Logger::info("Objects created, starting initialization...");
 
+    bool wifiReady = wifi && wifi->begin();
+    WifiManager::Status wifiState;
+    if (wifi) {
+        wifiState = wifi->getStatus();
+    }
+    String wifiDetail;
+    if (wifiReady && wifiState.connected) {
+        wifiDetail = wifiState.ssid + " @ " + wifiState.ip.toString();
+    } else if (wifiState.offlineMode) {
+        wifiDetail = "Offline mode";
+    } else {
+        wifiDetail = "Needs setup";
+    }
+    recordBootStatus("Wi-Fi", wifiReady, wifiDetail);
+    if (!wifiReady) {
+        Logger::warn("Wi-Fi not connected at boot; continuing with offline fallback");
+    }
+
     // Initialize all components
     Logger::info("Initializing ESP-NOW...");
-    if (!espNow->begin()) {
+    bool espNowOk = espNow->begin();
+    recordBootStatus("ESP-NOW", espNowOk, espNowOk ? "Radio ready" : "init failed");
+    if (!espNowOk) {
         Logger::error("Failed to initialize ESP-NOW");
         return false;
     }
@@ -127,15 +160,28 @@ bool Coordinator::begin() {
         Logger::info("Pairing successful - OK confirmation shown");
     });
 
+    if (mqtt && wifi) {
+        mqtt->setWifiManager(wifi);
+    }
+
     Logger::info("Initializing MQTT...");
-    if (!mqtt->begin()) {
+    bool mqttInitOk = mqtt->begin();
+    bool mqttConnected = mqtt->isConnected();
+    String brokerLabel = mqtt->getBrokerHost().isEmpty() ? String("auto") : mqtt->getBrokerHost();
+    recordBootStatus("MQTT", mqttConnected, mqttConnected ? String("Connected ") + brokerLabel : String("Waiting on ") + brokerLabel);
+    if (!mqttInitOk) {
         Logger::error("Failed to initialize MQTT");
         return false;
     }
     Logger::info("MQTT initialized successfully");
+    mqtt->setCommandCallback([this](const String& topic, const String& payload) {
+        this->handleMqttCommand(topic, payload);
+    });
 
     Logger::info("Initializing mmWave sensor...");
-    if (!mmWave->begin()) {
+    bool mmWaveOk = mmWave->begin();
+    recordBootStatus("mmWave", mmWaveOk, mmWaveOk ? "LD2450 streaming" : "will retry");
+    if (!mmWaveOk) {
         Logger::warn("Failed to initialize mmWave sensor - continuing without it");
         // Non-critical, continue without mmWave
     } else {
@@ -143,11 +189,23 @@ bool Coordinator::begin() {
     }
 
     Logger::info("Initializing node registry...");
-    if (!nodes->begin()) {
+    bool nodesOk = nodes->begin();
+    recordBootStatus("Nodes", nodesOk, nodesOk ? "registry ready" : "init failed");
+    if (!nodesOk) {
         Logger::error("Failed to initialize node registry");
         return false;
     }
     Logger::info("Node registry initialized successfully");
+    nodes->setNodeRegisteredCallback([this](const String& nodeId, const String& lightId) {
+        Logger::info("Node %s paired to light %s", nodeId.c_str(), lightId.c_str());
+        if (espNow) {
+            espNow->disablePairingMode();
+        }
+        if (nodes && nodes->isPairingActive()) {
+            nodes->stopPairing();
+        }
+        statusLed.pulse(0, 150, 0, 400);
+    });
 
     // Initialize onboard status LED
     statusLed.begin();
@@ -169,7 +227,9 @@ bool Coordinator::begin() {
     groupFlashUntilMs.assign(groupCount, 0);
     rebuildLedMappingFromRegistry();
 
-    if (!zones->begin()) {
+    bool zonesOk = zones->begin();
+    recordBootStatus("Zones", zonesOk, zonesOk ? "control ready" : "init failed");
+    if (!zonesOk) {
         Logger::error("Failed to initialize zone control");
         return false;
     }
@@ -177,15 +237,26 @@ bool Coordinator::begin() {
     // Disable idle breathing; LEDs indicate node connections per requirements
     statusLed.setIdleBreathing(false);
 
-    if (!buttons->begin()) {
+    bool buttonsOk = buttons->begin();
+    recordBootStatus("Button", buttonsOk, buttonsOk ? "GPIO ready" : "init failed");
+    if (!buttonsOk) {
         Logger::error("Failed to initialize button control");
         return false;
     }
 
-    if (!thermal->begin()) {
+    bool thermalOk = thermal->begin();
+    recordBootStatus("Thermal", thermalOk, thermalOk ? "monitoring" : "init failed");
+    if (!thermalOk) {
         Logger::error("Failed to initialize thermal control");
         return false;
     }
+
+    bool ambientOk = true;
+    if (ambientLight && !ambientLight->begin()) {
+        Logger::warn("Ambient light sensor init failed (continuing)");
+        ambientOk = false;
+    }
+    recordBootStatus("Ambient", ambientOk, ambientOk ? "ADC ready" : "sensor offline");
 
     // Register event handlers
     mmWave->setEventCallback([this](const MmWaveEvent& event) {
@@ -224,6 +295,7 @@ bool Coordinator::begin() {
         Logger::info("===========================================");
     });
 
+printBootSummary();
 Logger::info("Coordinator initialization complete");
 Logger::info("==============================================");
 Logger::info("System ready! Touch sensor to pair nodes.");
@@ -234,6 +306,9 @@ return true;
 }
 
 void Coordinator::loop() {
+    if (wifi) {
+        wifi->loop();
+    }
     // Use guard checks to prevent null pointer crashes
     if (espNow) espNow->loop();
     if (mqtt) mqtt->loop();
@@ -268,15 +343,23 @@ void Coordinator::loop() {
         checkStaleConnections();
         lastStaleCheck = now;
     }
+
+    refreshCoordinatorSensors();
+    printSerialTelemetry();
 }
 
 void Coordinator::onMmWaveEvent(const MmWaveEvent& event) {
+    lastMmWaveEvent = event;
+    haveMmWaveSample = true;
     // Guard against null pointers
     if (!zones || !nodes || !thermal || !espNow || !mqtt) {
         Logger::error("Cannot process mmWave event: components not initialized");
         return;
     }
     
+    // Publish raw mmWave frame to MQTT for backend/frontend consumption
+    mqtt->publishMmWaveEvent(event);
+
     // Process presence detection
     auto affectedLights = zones->getLightsForZone(event.sensorId);
     for (const auto& lightId : affectedLights) {
@@ -340,16 +423,8 @@ void Coordinator::onButtonEvent(const String& buttonId, bool pressed) {
         return;
     }
 
-    // Treat as short press -> open pairing window
-    Logger::info("Pairing button short press - opening pairing window");
     const uint32_t windowMs = 60000; // 60s pairing window
-    nodes->startPairing(windowMs);
-    espNow->enablePairingMode(windowMs);
-    
-    // Visual feedback: blue pulse to indicate pairing mode active
-    statusLed.pulse(0, 0, 180, 500); // Blue pulse
-    
-    Logger::info("Pairing window open for %d ms", windowMs);
+    startPairingWindow(windowMs, "button");
 }
 
 void Coordinator::handleNodeMessage(const String& nodeId, const uint8_t* data, size_t len) {
@@ -420,6 +495,7 @@ void Coordinator::handleNodeMessage(const String& nodeId, const uint8_t* data, s
         EspNowMessage* msg = MessageFactory::createMessage(payload);
         if (msg && msg->type == MessageType::NODE_STATUS) {
             NodeStatusMessage* statusMsg = static_cast<NodeStatusMessage*>(msg);
+            updateNodeTelemetryCache(nodeId, *statusMsg);
             
             // Log temperature if available
             if (statusMsg->temperature > -50.0f && statusMsg->temperature < 150.0f) {
@@ -662,4 +738,211 @@ void Coordinator::triggerNodeWaveTest() {
     }
 
     Logger::info("Wave command sent");
+}
+
+void Coordinator::handleMqttCommand(const String& topic, const String& payload) {
+    StaticJsonDocument<256> doc;
+    DeserializationError err = deserializeJson(doc, payload);
+    if (err) {
+        Logger::warn("Failed to parse MQTT command (%s)", err.c_str());
+        return;
+    }
+
+    String cmd = doc["cmd"] | "";
+    cmd.toLowerCase();
+    if (cmd == "pair" || cmd == "pairing.start" || cmd == "enter_pairing_mode") {
+        uint32_t windowMs = doc["duration_ms"] | 60000;
+        startPairingWindow(windowMs, "mqtt");
+    } else if (cmd == "pairing.stop") {
+        if (nodes) nodes->stopPairing();
+        if (espNow) espNow->disablePairingMode();
+        Logger::info("Pairing window closed via MQTT command");
+        Serial.println("Pairing window closed via MQTT command");
+    }
+}
+
+void Coordinator::startPairingWindow(uint32_t durationMs, const char* reason) {
+    if (!nodes || !espNow) {
+        return;
+    }
+    nodes->startPairing(durationMs);
+    espNow->enablePairingMode(durationMs);
+    const char* origin = reason ? reason : "manual";
+    Logger::info("Pairing window (%s) open for %u ms", origin, durationMs);
+    Serial.printf("PAIRING MODE (%s) OPEN for %lu ms\n", origin, (unsigned long)durationMs);
+    statusLed.pulse(0, 0, 180, 500);
+}
+
+void Coordinator::updateNodeTelemetryCache(const String& nodeId, const NodeStatusMessage& statusMsg) {
+    NodeTelemetrySnapshot snapshot;
+    snapshot.avgR = statusMsg.avg_r;
+    snapshot.avgG = statusMsg.avg_g;
+    snapshot.avgB = statusMsg.avg_b;
+    snapshot.avgW = statusMsg.avg_w;
+    snapshot.temperatureC = statusMsg.temperature;
+    snapshot.buttonPressed = statusMsg.button_pressed;
+    snapshot.lastUpdateMs = millis();
+    nodeTelemetry[nodeId] = snapshot;
+
+    if (mqtt) {
+        mqtt->publishNodeStatus(statusMsg);
+    }
+}
+
+void Coordinator::refreshCoordinatorSensors() {
+    uint32_t now = millis();
+    if (now - lastSensorSampleMs < 2000) {
+        return;
+    }
+    lastSensorSampleMs = now;
+
+    if (ambientLight) {
+        coordinatorSensors.lightLux = ambientLight->readLux();
+    }
+    coordinatorSensors.temperatureC = readInternalTemperatureC();
+    coordinatorSensors.timestampMs = now;
+    bool mmWaveOnline = mmWave && mmWave->isOnline();
+    coordinatorSensors.mmWaveOnline = mmWaveOnline;
+    if (haveMmWaveSample && mmWaveOnline) {
+        coordinatorSensors.mmWavePresence = lastMmWaveEvent.presence;
+        coordinatorSensors.mmWaveConfidence = lastMmWaveEvent.confidence;
+    } else if (!mmWaveOnline) {
+        coordinatorSensors.mmWavePresence = false;
+        coordinatorSensors.mmWaveConfidence = 0.0f;
+    }
+
+    if (wifi) {
+        WifiManager::Status wifiStatus = wifi->getStatus();
+        coordinatorSensors.wifiConnected = wifiStatus.connected && !wifiStatus.offlineMode;
+        coordinatorSensors.wifiRssi = wifiStatus.connected ? wifiStatus.rssi : -127;
+    } else {
+        coordinatorSensors.wifiConnected = WiFi.status() == WL_CONNECTED;
+        coordinatorSensors.wifiRssi = coordinatorSensors.wifiConnected ? WiFi.RSSI() : -127;
+    }
+
+    if (mqtt) {
+        mqtt->publishCoordinatorTelemetry(coordinatorSensors);
+    }
+}
+
+void Coordinator::printSerialTelemetry() {
+    uint32_t now = millis();
+    if (now - lastSerialPrintMs < 3000) {
+        return;
+    }
+    lastSerialPrintMs = now;
+
+    WifiManager::Status wifiStatus;
+    if (wifi) {
+        wifiStatus = wifi->getStatus();
+    } else {
+        wifiStatus.connected = (WiFi.status() == WL_CONNECTED);
+        wifiStatus.ssid = wifiStatus.connected ? WiFi.SSID() : "";
+        wifiStatus.rssi = wifiStatus.connected ? WiFi.RSSI() : -127;
+        wifiStatus.offlineMode = false;
+    }
+
+    bool mqttConnected = mqtt && mqtt->isConnected();
+    String brokerHost = mqtt ? mqtt->getBrokerHost() : String("n/a");
+    uint16_t brokerPort = mqtt ? mqtt->getBrokerPort() : 0;
+    const char* pairingState = (nodes && nodes->isPairingActive()) ? "OPEN" : "IDLE";
+    const char* mmStatus;
+    if (!coordinatorSensors.mmWaveOnline) {
+        mmStatus = "OFFLINE";
+    } else {
+        mmStatus = coordinatorSensors.mmWavePresence ? "PRESENT" : "CLEAR";
+    }
+    uint16_t mmRestarts = mmWave ? mmWave->getRestartCount() : 0;
+
+    size_t activeNodes = 0;
+    for (const auto& entry : nodeTelemetry) {
+        if (now - entry.second.lastUpdateMs <= 30000) {
+            activeNodes++;
+        }
+    }
+
+    Serial.println();
+    Serial.println("========== Coordinator Snapshot ==========");
+    Serial.printf("Sensors   | Lux %5.1f  Temp %4.1f C\n",
+                  coordinatorSensors.lightLux,
+                  coordinatorSensors.temperatureC);
+    Serial.printf("mmWave    | %-8s  conf=%.2f restarts=%u\n",
+                  mmStatus,
+                  coordinatorSensors.mmWaveConfidence,
+                  static_cast<unsigned>(mmRestarts));
+    if (!coordinatorSensors.mmWaveOnline) {
+        Serial.println("           | sensor offline - verify LD2450 wiring (RX=GPIO44, TX=GPIO43, 3V3, GND)");
+    }
+    Serial.printf("Wi-Fi     | %-10s ssid=%s rssi=%d dBm offline=%s\n",
+                  wifiStatus.connected ? "CONNECTED" : "DISCONNECTED",
+                  wifiStatus.ssid.c_str(),
+                  wifiStatus.rssi,
+                  wifiStatus.offlineMode ? "true" : "false");
+    Serial.printf("MQTT      | %-10s %s:%u\n",
+                  mqttConnected ? "CONNECTED" : "RETRYING",
+                  brokerHost.c_str(),
+                  brokerPort);
+    Serial.printf("Pairing   | %s\n", pairingState);
+    if (activeNodes == 0) {
+        Serial.println("Nodes     | none paired (mmWave + ambient-only mode)");
+    } else {
+        Serial.printf("Nodes     | %u active\n", static_cast<unsigned>(activeNodes));
+        for (const auto& entry : nodeTelemetry) {
+            const auto& data = entry.second;
+            uint32_t age = now - data.lastUpdateMs;
+            if (age > 30000) {
+                continue;
+            }
+            Serial.printf("           - %s -> RGBW(%d,%d,%d,%d) temp=%.1f C btn=%s age=%lus\n",
+                          entry.first.c_str(),
+                          data.avgR,
+                          data.avgG,
+                          data.avgB,
+                          data.avgW,
+                          data.temperatureC,
+                          data.buttonPressed ? "DOWN" : "up",
+                          static_cast<unsigned long>(age / 1000));
+        }
+    }
+    Serial.println("==========================================");
+}
+
+void Coordinator::recordBootStatus(const char* name, bool ok, const String& detail) {
+    BootStatusEntry entry;
+    entry.name = name ? name : "Subsystem";
+    entry.ok = ok;
+    entry.detail = detail;
+    bootStatus.push_back(entry);
+}
+
+void Coordinator::printBootSummary() {
+    if (bootStatus.empty()) {
+        return;
+    }
+    Serial.println();
+    Serial.println("┌────────────┬──────────────────────────────┐");
+    Serial.println("│ Subsystem  │ Status                       │");
+    Serial.println("├────────────┼──────────────────────────────┤");
+    for (const auto& entry : bootStatus) {
+        String detail = entry.detail;
+        if (detail.isEmpty()) {
+            detail = entry.ok ? "OK" : "See logs";
+        }
+        if (detail.length() > 28) {
+            detail = detail.substring(0, 25) + "...";
+        }
+        String status = String(entry.ok ? "✓ " : "! ") + detail;
+        Serial.printf("│ %-10s │ %-30s │\n", entry.name.c_str(), status.c_str());
+    }
+    Serial.println("└────────────┴──────────────────────────────┘");
+    Serial.println();
+}
+
+float Coordinator::readInternalTemperatureC() const {
+#if defined(ARDUINO_ARCH_ESP32)
+    float f = temperatureRead();
+    return (f - 32.0f) / 1.8f;
+#else
+    return 0.0f;
+#endif
 }

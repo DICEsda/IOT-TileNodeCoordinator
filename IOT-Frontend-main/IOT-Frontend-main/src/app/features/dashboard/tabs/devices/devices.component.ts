@@ -1,23 +1,13 @@
 import { CommonModule } from '@angular/common';
-import { Component, signal } from '@angular/core';
+import { Component, OnInit, effect, inject, signal } from '@angular/core';
+import { Coordinator, Node } from '../../../../core/models/api.models';
+import { DataService } from '../../../../core/services/data.service';
 
-interface Sensor {
-  id: string;
-  type: string;
-  value: string;
-  status: 'active' | 'inactive';
-}
+type DeviceStatus = 'online' | 'offline' | 'warning' | 'error' | 'pairing';
 
-interface Device {
-  id: number;
-  name: string;
-  location: string;
-  status: 'online' | 'offline' | 'warning';
-  battery: number;
-  lastSeen: Date;
-  sensors: Sensor[];
-  activeLights: number;
-  totalLights: number;
+interface SensorRow {
+  label: string;
+  value: string | null;
 }
 
 @Component({
@@ -26,130 +16,148 @@ interface Device {
   templateUrl: './devices.component.html',
   styleUrl: './devices.component.scss'
 })
-export class DevicesComponent {
-  devices = signal<Device[]>([
-    {
-      id: 1,
-      name: 'Node 01 - Front Left',
-      location: 'Front Left Corner',
-      status: 'online',
-      battery: 87,
-      lastSeen: new Date(),
-      sensors: [
-        { id: 'motion-1', type: 'Motion Sensor', value: 'Active', status: 'active' },
-        { id: 'light-1', type: 'Light Sensor', value: '450 lux', status: 'active' },
-        { id: 'temp-1', type: 'Temperature', value: '22°C', status: 'active' }
-      ],
-      activeLights: 4,
-      totalLights: 6
-    },
-    {
-      id: 2,
-      name: 'Node 02 - Front Center',
-      location: 'Front Center',
-      status: 'online',
-      battery: 92,
-      lastSeen: new Date(),
-      sensors: [
-        { id: 'motion-2', type: 'Motion Sensor', value: 'Inactive', status: 'inactive' },
-        { id: 'light-2', type: 'Light Sensor', value: '320 lux', status: 'active' },
-        { id: 'temp-2', type: 'Temperature', value: '21°C', status: 'active' }
-      ],
-      activeLights: 0,
-      totalLights: 6
-    },
-    {
-      id: 3,
-      name: 'Node 03 - Front Right',
-      location: 'Front Right Corner',
-      status: 'online',
-      battery: 78,
-      lastSeen: new Date(),
-      sensors: [
-        { id: 'motion-3', type: 'Motion Sensor', value: 'Active', status: 'active' },
-        { id: 'light-3', type: 'Light Sensor', value: '280 lux', status: 'active' },
-        { id: 'temp-3', type: 'Temperature', value: '23°C', status: 'active' }
-      ],
-      activeLights: 6,
-      totalLights: 6
-    },
-    {
-      id: 4,
-      name: 'Node 04 - Back Left',
-      location: 'Back Left Corner',
-      status: 'warning',
-      battery: 15,
-      lastSeen: new Date(Date.now() - 1000 * 60 * 5),
-      sensors: [
-        { id: 'motion-4', type: 'Motion Sensor', value: 'Inactive', status: 'inactive' },
-        { id: 'light-4', type: 'Light Sensor', value: '150 lux', status: 'active' },
-        { id: 'temp-4', type: 'Temperature', value: '20°C', status: 'active' }
-      ],
-      activeLights: 2,
-      totalLights: 6
-    },
-    {
-      id: 5,
-      name: 'Node 05 - Back Center',
-      location: 'Back Center',
-      status: 'online',
-      battery: 95,
-      lastSeen: new Date(),
-      sensors: [
-        { id: 'motion-5', type: 'Motion Sensor', value: 'Active', status: 'active' },
-        { id: 'light-5', type: 'Light Sensor', value: '410 lux', status: 'active' },
-        { id: 'temp-5', type: 'Temperature', value: '22°C', status: 'active' }
-      ],
-      activeLights: 5,
-      totalLights: 6
-    },
-    {
-      id: 6,
-      name: 'Node 06 - Back Right',
-      location: 'Back Right Corner',
-      status: 'online',
-      battery: 68,
-      lastSeen: new Date(),
-      sensors: [
-        { id: 'motion-6', type: 'Motion Sensor', value: 'Inactive', status: 'inactive' },
-        { id: 'light-6', type: 'Light Sensor', value: '200 lux', status: 'active' },
-        { id: 'temp-6', type: 'Temperature', value: '21°C', status: 'active' }
-      ],
-      activeLights: 1,
-      totalLights: 6
+export class DevicesComponent implements OnInit {
+  private readonly data = inject(DataService);
+
+  loading = signal<boolean>(true);
+  coordinator = signal<Coordinator | null>(null);
+  nodes = signal<Node[]>([]);
+
+  constructor() {
+    effect(() => {
+      const coordinators = Array.from(this.data.coordinators().values());
+      this.coordinator.set(coordinators.length ? coordinators[0] : null);
+    });
+
+    effect(() => {
+      const nodeList = Array.from(this.data.nodes().values());
+      this.nodes.set(nodeList);
+    });
+  }
+
+  async ngOnInit(): Promise<void> {
+    try {
+      if (!this.data.activeSiteId()) {
+        if (this.data.sites().length === 0) {
+          await this.data.loadSites();
+        }
+        const defaultSite = this.data.sites()[0];
+        if (defaultSite) {
+          await this.data.loadSite(defaultSite._id);
+        }
+      } else {
+        await this.data.loadSite(this.data.activeSiteId()!);
+      }
+    } catch (error) {
+      console.error('[DevicesComponent] failed to initialize site data', error);
+    } finally {
+      this.loading.set(false);
     }
-  ]);
+  }
+
+  getNodesList(): Node[] {
+    const byStatus = (node: Node): number => {
+      const statusPriority: Record<DeviceStatus, number> = {
+        online: 0,
+        pairing: 1,
+        warning: 2,
+        error: 3,
+        offline: 4
+      } as const;
+      return statusPriority[(node.status as DeviceStatus) ?? 'offline'] ?? 4;
+    };
+
+    return [...this.nodes()].sort((a, b) => {
+      const statusDiff = byStatus(a) - byStatus(b);
+      if (statusDiff !== 0) return statusDiff;
+      return (a.node_id || '').localeCompare(b.node_id || '');
+    });
+  }
 
   get onlineDevicesCount(): number {
-    return this.devices().filter(d => d.status === 'online').length;
+    return this.nodes().filter((node: Node) => node.status === 'online').length;
   }
 
   get warningDevicesCount(): number {
-    return this.devices().filter(d => d.status === 'warning').length;
+    return this.nodes().filter((node: Node) => this.isWarningNode(node)).length;
   }
 
   get offlineDevicesCount(): number {
-    return this.devices().filter(d => d.status === 'offline').length;
+    return this.nodes().filter((node: Node) => node.status === 'offline').length;
   }
 
-  formatLastSeen(date: Date): string {
-    const now = new Date();
-    const diff = now.getTime() - date.getTime();
-    const minutes = Math.floor(diff / 60000);
+  private isWarningNode(node: Node): boolean {
+    const battery = this.getBatteryPercent(node);
+    if (battery !== null && battery <= 30) {
+      return true;
+    }
+    return node.status === 'error' || node.status === 'pairing';
+  }
 
-    if (minutes < 1) return 'Just now';
-    if (minutes === 1) return '1 minute ago';
-    if (minutes < 60) return `${minutes} minutes ago`;
+  coordinatorStatus(): DeviceStatus {
+    return (this.coordinator()?.status as DeviceStatus) ?? 'offline';
+  }
 
-    const hours = Math.floor(minutes / 60);
+  getConnectionSubtitle(): string {
+    return this.coordinatorStatus() === 'online'
+      ? 'Paired & connected to nodes'
+      : 'Link offline';
+  }
+
+  formatLastSeen(value?: Date | string): string {
+    if (!value) return 'No data';
+    const date = typeof value === 'string' ? new Date(value) : value;
+    if (Number.isNaN(date.getTime())) return 'No data';
+
+    const diffMinutes = Math.floor((Date.now() - date.getTime()) / 60000);
+    if (diffMinutes < 1) return 'Just now';
+    if (diffMinutes === 1) return '1 minute ago';
+    if (diffMinutes < 60) return `${diffMinutes} minutes ago`;
+
+    const hours = Math.floor(diffMinutes / 60);
     if (hours === 1) return '1 hour ago';
-    return `${hours} hours ago`;
+    if (hours < 24) return `${hours} hours ago`;
+
+    const days = Math.floor(hours / 24);
+    return days === 1 ? '1 day ago' : `${days} days ago`;
   }
 
-  getBatteryClass(battery: number): string {
-    if (battery > 70) return 'good';
-    if (battery > 30) return 'medium';
+  getBatteryPercent(node: Node): number | null {
+    if (typeof node.battery_percent === 'number') {
+      return Math.max(0, Math.min(100, node.battery_percent));
+    }
+    return null;
+  }
+
+  getBatteryClass(percent: number | null): string {
+    if (percent === null) return 'empty';
+    if (percent > 70) return 'good';
+    if (percent > 30) return 'medium';
     return 'low';
+  }
+
+  getSensorRows(node: Node): SensorRow[] {
+    return [
+      {
+        label: 'Temperature',
+        value: typeof node.temperature === 'number' ? `${node.temperature.toFixed(1)}°C` : null
+      },
+      {
+        label: 'Battery Voltage',
+        value: typeof node.battery_voltage === 'number' ? `${node.battery_voltage.toFixed(2)}V` : null
+      },
+      {
+        label: 'Zone',
+        value: node.zone_id ?? null
+      }
+    ];
+  }
+
+  formatUptime(seconds?: number): string {
+    if (!seconds || seconds <= 0) return 'No data';
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    return `${hours}h ${minutes}m`;
   }
 }
 

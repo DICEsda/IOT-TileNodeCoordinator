@@ -1,128 +1,132 @@
 <div class="devices-container">
-  <div class="devices-header card">
-    <h2>Devices & Sensors</h2>
-    <div class="devices-stats">
-      <div class="stat">
-        <span class="stat-value">{{ onlineDevicesCount }}</span>
-        <span class="stat-label">Online</span>
+  <ng-container *ngIf="!loading(); else loadingState">
+    <div class="coordinator-panel card" *ngIf="coordinator(); else noCoordinator">
+      <div class="coordinator-header">
+        <div>
+          <p class="label">Coordinator</p>
+          <h3>{{ coordinator()?.coord_id || 'Unknown coordinator' }}</h3>
+          <p class="site">{{ coordinator()?.site_id || 'No site assigned' }}</p>
+        </div>
+        <div class="coordinator-status" [class.offline]="coordinatorStatus() !== 'online'">
+          <span class="status-dot"></span>
+          {{ coordinatorStatus() }}
+        </div>
       </div>
-      <div class="stat">
-        <span class="stat-value warning">{{ warningDevicesCount }}</span>
-        <span class="stat-label">Warning</span>
+      <div class="coordinator-meta">
+        <div>
+          <span>Firmware</span>
+          <strong>{{ coordinator()?.firmware_version || 'No data' }}</strong>
+        </div>
+        <div>
+          <span>Uptime</span>
+          <strong>{{ formatUptime(coordinator()?.uptime) }}</strong>
+        </div>
+        <div>
+          <span>Heap Free</span>
+          <strong>{{ (coordinator()?.heap_free ?? null) !== null ? coordinator()?.heap_free + ' KB' : 'No data' }}</strong>
+        </div>
       </div>
-      <div class="stat">
-        <span class="stat-value danger">{{ offlineDevicesCount }}</span>
-        <span class="stat-label">Offline</span>
+      <div class="link-bridge" [class.offline]="coordinatorStatus() !== 'online'">
+        <div class="link-line"></div>
+        <span>{{ getConnectionSubtitle() }}</span>
       </div>
     </div>
-  </div>
 
-  <div class="devices-grid">
-    @for (device of devices(); track device.id) {
-      <div class="device-card card" [class]="device.status">
-        <div class="device-header">
-          <div class="device-info">
-            <h3>{{ device.name }}</h3>
-            <p class="location">{{ device.location }}</p>
-          </div>
-          <div class="device-status" [class]="device.status">
-            <span class="status-dot"></span>
-            {{ device.status }}
-          </div>
+    <ng-template #noCoordinator>
+      <div class="empty-state card">
+        <h3>No coordinator detected</h3>
+        <p>Once the coordinator connects, it will appear here with its live serial link.</p>
+      </div>
+    </ng-template>
+
+    <div class="devices-header card">
+      <h2>Devices & Sensors</h2>
+      <div class="devices-stats">
+        <div class="stat">
+          <span class="stat-value">{{ onlineDevicesCount }}</span>
+          <span class="stat-label">Online</span>
         </div>
-
-        <div class="device-metrics">
-          <div class="metric-row">
-            <div class="metric">
-              <span class="metric-label">Battery</span>
-              <div class="battery-indicator" [class]="getBatteryClass(device.battery)">
-                <div class="battery-fill" [style.width.%]="device.battery"></div>
-                <span class="battery-text">{{ device.battery }}%</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="metric-row">
-            <div class="metric">
-              <span class="metric-label">Lights Active</span>
-              <div class="lights-indicator">
-                <span class="lights-count">{{ device.activeLights }}/{{ device.totalLights }}</span>
-                <div class="lights-bar">
-                  <div class="lights-fill" [style.width.%]="(device.activeLights / device.totalLights) * 100"></div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="metric-row">
-            <div class="metric">
-              <span class="metric-label">Last Seen</span>
-              <span class="metric-value">{{ formatLastSeen(device.lastSeen) }}</span>
-            </div>
-          </div>
+        <div class="stat">
+          <span class="stat-value warning">{{ warningDevicesCount }}</span>
+          <span class="stat-label">Warning</span>
         </div>
-
-        <div class="sensors-section">
-          <h4>Sensors</h4>
-          <div class="sensors-grid">
-            @for (sensor of device.sensors; track sensor.id) {
-              <div class="sensor-item" [class]="sensor.status">
-                <div class="sensor-icon">
-                  @if (sensor.type === 'Motion Sensor') {
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-                      <circle cx="9" cy="7" r="4"/>
-                      <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
-                      <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-                    </svg>
-                  }
-                  @if (sensor.type === 'Light Sensor') {
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <circle cx="12" cy="12" r="5"/>
-                      <line x1="12" y1="1" x2="12" y2="3"/>
-                      <line x1="12" y1="21" x2="12" y2="23"/>
-                      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
-                      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
-                      <line x1="1" y1="12" x2="3" y2="12"/>
-                      <line x1="21" y1="12" x2="23" y2="12"/>
-                      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
-                      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
-                    </svg>
-                  }
-                  @if (sensor.type === 'Temperature') {
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"/>
-                    </svg>
-                  }
-                </div>
-                <div class="sensor-info">
-                  <span class="sensor-type">{{ sensor.type }}</span>
-                  <span class="sensor-value">{{ sensor.value }}</span>
-                </div>
-              </div>
-            }
-          </div>
-        </div>
-
-        <div class="device-actions">
-          <button class="action-btn">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="3"/>
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-            </svg>
-            Configure
-          </button>
-          <button class="action-btn">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="23 4 23 10 17 10"/>
-              <polyline points="1 20 1 14 7 14"/>
-              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
-            </svg>
-            Restart
-          </button>
+        <div class="stat">
+          <span class="stat-value danger">{{ offlineDevicesCount }}</span>
+          <span class="stat-label">Offline</span>
         </div>
       </div>
-    }
-  </div>
+    </div>
+
+    <div class="devices-grid" *ngIf="getNodesList().length; else noNodes">
+      @for (node of getNodesList(); track node.node_id) {
+        <div class="device-card card" [class]="node.status">
+          <div class="device-header">
+            <div class="device-info">
+              <h3>{{ node.node_id || 'Unknown node' }}</h3>
+              <p class="location">Zone: {{ node.zone_id || 'No data' }}</p>
+            </div>
+            <div class="device-status" [class]="node.status">
+              <span class="status-dot"></span>
+              {{ node.status || 'offline' }}
+            </div>
+          </div>
+
+          <div class="device-metrics">
+            <div class="metric-row">
+              <div class="metric">
+                <span class="metric-label">Battery</span>
+                <div class="battery-indicator" [class]="getBatteryClass(getBatteryPercent(node))">
+                  <div class="battery-fill" [style.width.%]="getBatteryPercent(node) ?? 0"></div>
+                  <span class="battery-text">{{ getBatteryPercent(node) !== null ? (getBatteryPercent(node) + '%') : 'No data' }}</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="metric-row">
+              <div class="metric">
+                <span class="metric-label">Brightness</span>
+                <span class="metric-value">{{ node.brightness !== undefined ? node.brightness + '%' : 'No data' }}</span>
+              </div>
+            </div>
+
+            <div class="metric-row">
+              <div class="metric">
+                <span class="metric-label">Last Seen</span>
+                <span class="metric-value">{{ formatLastSeen(node.last_seen) }}</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="sensors-section">
+            <h4>Sensors</h4>
+            <div class="sensors-grid">
+              @for (sensor of getSensorRows(node); track sensor.label) {
+                <div class="sensor-item" [class.missing]="!sensor.value">
+                  <div class="sensor-info">
+                    <span class="sensor-type">{{ sensor.label }}</span>
+                    <span class="sensor-value">{{ sensor.value || 'No data' }}</span>
+                  </div>
+                </div>
+              }
+            </div>
+          </div>
+        </div>
+      }
+    </div>
+
+    <ng-template #noNodes>
+      <div class="empty-state card">
+        <h3>No nodes reporting yet</h3>
+        <p>Pair a tile node or wait for telemetry to stream in.</p>
+      </div>
+    </ng-template>
+  </ng-container>
+
+  <ng-template #loadingState>
+    <div class="empty-state card">
+      <h3>Loading devices…</h3>
+      <p>Fetching coordinator and node telemetry.</p>
+    </div>
+  </ng-template>
 </div>
 

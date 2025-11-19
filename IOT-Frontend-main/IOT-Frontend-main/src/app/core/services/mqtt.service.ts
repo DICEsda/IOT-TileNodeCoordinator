@@ -214,6 +214,13 @@ export class MqttService {
   }
 
   /**
+   * Subscribe to mmWave frames for a coordinator or all coordinators in a site
+   */
+  subscribeCoordinatorMmwave(siteId: string, coordinatorId: string = '+'): Subject<any> {
+    return this.subscribe(`site/${siteId}/coord/${coordinatorId}/mmwave`);
+  }
+
+  /**
    * Send command to a node
    */
   sendNodeCommand(siteId: string, nodeId: string, command: any): void {

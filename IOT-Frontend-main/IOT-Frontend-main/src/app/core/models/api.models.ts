@@ -164,6 +164,28 @@ export interface PresenceEvent {
   timestamp: Date;
 }
 
+export interface MmwaveTarget {
+  id: number;
+  distance_mm: number;
+  speed_cm_s: number;
+  resolution_mm: number;
+  position_x_mm: number;
+  position_y_mm: number;
+  velocity_x_m_s: number;
+  velocity_y_m_s: number;
+}
+
+export interface MmwaveFrame {
+  id?: string;
+  site_id: string;
+  coordinator_id: string;
+  sensor_id: string;
+  presence: boolean;
+  confidence: number;
+  targets: MmwaveTarget[];
+  timestamp: Date;
+}
+
 // ============================================================================
 // Health Models
 // ============================================================================

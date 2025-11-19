@@ -75,8 +75,8 @@
     </div>
   </header>
 
-  <!-- Tab Content -->
-  <main class="tab-content">
+  <!-- Tab Content (hidden until connections are healthy) -->
+  <main class="tab-content" *ngIf="isHealthy(); else connectionNotice">
     @if (activeTab() === 'monitor') {
       <div class="monitor-layout">
         <div class="visualizer-section">
@@ -100,5 +100,17 @@
       <app-settings></app-settings>
     }
   </main>
+
+  <ng-template #connectionNotice>
+    <div style="display:flex;flex-direction:column;gap:12px;align-items:center;justify-content:center;padding:40px;color:#666;">
+      <h3 style="margin:0;">Waiting for connections…</h3>
+      <div style="display:flex;gap:16px;">
+        <span>API: {{ data.apiHealthy() ? '✓' : '✗' }}</span>
+        <span>WebSocket: {{ data.wsConnected() ? '✓' : '✗' }}</span>
+        <span>MQTT: {{ data.mqttConnected() ? '✓' : '✗' }}</span>
+      </div>
+      <small>Dashboard content appears once the system is live.</small>
+    </div>
+  </ng-template>
 </div>
 

@@ -1,5 +1,6 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnDestroy, OnInit, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, signal, inject } from '@angular/core';
+import { DataService } from '../../core/services/data.service';
 import { LightMonitorComponent } from './components/light-monitor/light-monitor.component';
 import { RoomVisualizerComponent } from './components/room-visualizer/room-visualizer.component';
 import { CalibrateComponent } from './tabs/calibrate/calibrate.component';
@@ -28,6 +29,8 @@ interface LightNodeState {
   styleUrl: './dashboard.component.scss'
 })
 export class DashboardComponent implements OnInit, OnDestroy {
+  // Inject DataService to reflect real connection state
+  data = inject(DataService);
   activeTab = signal<string>('monitor');
   currentTime = signal<string>('');
   totalActiveLights = signal<number>(0);
@@ -72,6 +75,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   getCurrentTime(): string {
     return this.currentTime();
+  }
+
+  isHealthy(): boolean {
+    return this.data.getSystemHealth().overall;
   }
 }
 

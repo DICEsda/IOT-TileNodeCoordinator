@@ -1,37 +1,65 @@
-<div class="visualizer-container">
-  <div class="visualizer-header">
-    <h2>3D Room Visualization</h2>
-    <div class="view-controls">
-      <span class="hint">WASD to move • Mouse drag to look • Scroll to zoom (when not moving)</span>
+<div class="radar-card">
+  <div class="radar-header">
+    <div class="radar-title">
+      <h2>mmWave Radar</h2>
+      <p class="subtitle">Site {{ latestFrame?.site_id || siteId }} • Coordinator {{ latestFrame?.coordinator_id || coordinatorId }}</p>
+    </div>
+    <div class="radar-meta">
+      <span class="badge" [class.active]="presenceDetected">{{ presenceDetected ? 'Presence Detected' : 'No Presence' }}</span>
+      <span class="meta-item">Targets: {{ targetCount }}</span>
+      <span class="meta-item" *ngIf="lastUpdated">Updated {{ lastUpdated | date:'HH:mm:ss' }}</span>
+      <span class="meta-item" *ngIf="latestFrame">Confidence {{ latestFrame.confidence | number:'1.0-2' }}</span>
     </div>
   </div>
-  <canvas #canvas></canvas>
-  <div class="control-legend" [class.minimized]="legendMinimized">
-    <button class="legend-toggle" (click)="toggleLegend()" title="Toggle controls">
-      <span class="toggle-icon">{{ legendMinimized ? '▶' : '▼' }}</span>
-      <span class="legend-title" *ngIf="!legendMinimized">Controls</span>
-    </button>
 
-    <div class="legend-content" *ngIf="!legendMinimized">
-      <div class="legend-section">
-        <p><strong>Avatar Controls:</strong></p>
-        <ul>
-          <li><kbd>W</kbd> / <kbd>↑</kbd> - Move Forward</li>
-          <li><kbd>A</kbd> / <kbd>←</kbd> - Move Left</li>
-          <li><kbd>S</kbd> / <kbd>↓</kbd> - Move Backward</li>
-          <li><kbd>D</kbd> / <kbd>→</kbd> - Move Right</li>
-        </ul>
-      </div>
-      <div class="legend-section">
-        <p><strong>View Controls:</strong></p>
-        <ul>
-          <li><strong>Mouse Drag</strong> - Look Around (while avatar controls active)</li>
-          <li><strong>Mouse Drag</strong> - Rotate View (when no keys pressed, uses Orbit Controls)</li>
-          <li><strong>Scroll</strong> - Zoom In/Out</li>
-        </ul>
-      </div>
-      <div class="legend-section">
-        <p><strong>Lighting:</strong> Lights turn ON when you're near, OFF when you move away.</p>
+  <div class="radar-body">
+    <div class="radar-display">
+      <canvas #radarCanvas></canvas>
+    </div>
+    <div class="radar-summary">
+      <h3>Latest Targets</h3>
+
+      <ng-container *ngIf="latestFrame as frame; else noFrame">
+        <div class="empty-state" *ngIf="frame.targets.length === 0">
+          No active targets detected in the last frame.
+        </div>
+
+        <ng-container *ngIf="frame.targets.length > 0">
+          <div class="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Distance</th>
+                  <th>X</th>
+                  <th>Y</th>
+                  <th>Vx</th>
+                  <th>Vy</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr *ngFor="let target of frame.targets">
+                  <td>{{ target.id }}</td>
+                  <td>{{ target.distance_mm / 1000 | number:'1.1-1' }} m</td>
+                  <td>{{ target.position_x_mm / 1000 | number:'1.1-1' }} m</td>
+                  <td>{{ target.position_y_mm / 1000 | number:'1.1-1' }} m</td>
+                  <td>{{ target.velocity_x_m_s | number:'1.1-1' }} m/s</td>
+                  <td>{{ target.velocity_y_m_s | number:'1.1-1' }} m/s</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </ng-container>
+      </ng-container>
+
+      <ng-template #noFrame>
+        <div class="empty-state">
+          No frames received yet. Waiting for mmWave telemetry…
+        </div>
+      </ng-template>
+
+      <div class="history-hint" *ngIf="frames.length > 1 && frames[frames.length - 1].timestamp as oldest">
+        Showing {{ frames.length }} cached frames • Oldest {{ oldest | date:'HH:mm:ss' }}
       </div>
     </div>
   </div>

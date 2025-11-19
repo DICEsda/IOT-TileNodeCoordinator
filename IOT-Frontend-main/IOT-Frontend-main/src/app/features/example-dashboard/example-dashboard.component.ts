@@ -50,67 +50,83 @@ import { Site, Node, NodeTelemetry, SetLightCommand } from '../../core/models/ap
         <button (click)="retry()">Retry</button>
       </div>
 
-      <!-- Sites List -->
-      <div *ngIf="!loading() && !error()" class="sites">
-        <h2>Sites ({{ data.sites().length }})</h2>
-        <div class="site-list">
-          <div 
-            *ngFor="let site of data.sites()" 
-            class="site-card"
-            [class.active]="site._id === data.activeSiteId()"
-            (click)="selectSite(site._id)"
-          >
-            <h3>{{ site.name }}</h3>
-            <p>{{ site.location || 'No location' }}</p>
-            <p>{{ site.coordinators.length }} coordinator(s)</p>
-            <p>{{ site.zones.length }} zone(s)</p>
-          </div>
-        </div>
-      </div>
-
-      <!-- Active Site Details -->
-      <div *ngIf="data.activeSiteId()" class="active-site">
-        <h2>Active Site: {{ getActiveSiteName() }}</h2>
-        
-        <!-- Nodes -->
-        <div class="nodes-section">
-          <h3>Nodes ({{ getNodesList().length }})</h3>
-          <div class="node-list">
+      <!-- Main content is shown only when connections are healthy -->
+      <ng-container *ngIf="isHealthy(); else connectionNotice">
+        <!-- Sites List (only if we actually have sites) -->
+        <div *ngIf="!loading() && !error() && data.sites().length > 0" class="sites">
+          <h2>Sites ({{ data.sites().length }})</h2>
+          <div class="site-list">
             <div 
-              *ngFor="let node of getNodesList()" 
-              class="node-card"
-              [class.online]="node.status === 'online'"
-              [class.offline]="node.status === 'offline'"
+              *ngFor="let site of data.sites()" 
+              class="site-card"
+              [class.active]="site._id === data.activeSiteId()"
+              (click)="selectSite(site._id)"
             >
-              <h4>{{ node.node_id }}</h4>
-              <p>Status: {{ node.status }}</p>
-              
-              <!-- Show telemetry if available -->
-              <div *ngIf="getNodeTelemetry(node.node_id) as telemetry" class="telemetry">
-                <p>Temperature: {{ telemetry.temperature?.toFixed(1) }}°C</p>
-                <p>Battery: {{ telemetry.battery_percent }}%</p>
-                <div class="color-preview" [style.background-color]="getRgbColor(telemetry.rgbw)"></div>
-              </div>
-
-              <!-- Controls -->
-              <div class="controls">
-                <button (click)="setNodeColor(node.node_id, 'red')">Red</button>
-                <button (click)="setNodeColor(node.node_id, 'green')">Green</button>
-                <button (click)="setNodeColor(node.node_id, 'blue')">Blue</button>
-                <button (click)="setNodeColor(node.node_id, 'white')">White</button>
-                <button (click)="turnOff(node.node_id)">Off</button>
-              </div>
+              <h3>{{ site.name }}</h3>
+              <p>{{ site.location || 'No location' }}</p>
+              <p>{{ site.coordinators.length }} coordinator(s)</p>
+              <p>{{ site.zones.length }} zone(s)</p>
             </div>
           </div>
         </div>
 
-        <!-- Real-time Updates -->
-        <div class="realtime-section">
-          <h3>Real-time Telemetry</h3>
-          <p>Updates received: {{ telemetryCount() }}</p>
-          <p>Last update: {{ lastUpdate() }}</p>
+        <!-- Active Site Details -->
+        <div *ngIf="data.activeSiteId()" class="active-site">
+          <h2>Active Site: {{ getActiveSiteName() }}</h2>
+          
+          <!-- Nodes -->
+          <div class="nodes-section">
+            <h3>Nodes Online ({{ getConnectedNodesList().length }})</h3>
+            <div class="node-list">
+              <div 
+                *ngFor="let node of getConnectedNodesList()" 
+                class="node-card"
+                [class.online]="node.status === 'online'"
+                [class.offline]="node.status === 'offline'"
+              >
+                <h4>{{ node.node_id }}</h4>
+                <p>Status: {{ node.status }}</p>
+                
+                <!-- Show telemetry if available -->
+                <div *ngIf="getNodeTelemetry(node.node_id) as telemetry" class="telemetry">
+                  <p>Temperature: {{ telemetry.temperature?.toFixed(1) }}°C</p>
+                  <p>Battery: {{ telemetry.battery_percent }}%</p>
+                  <div class="color-preview" [style.background-color]="getRgbColor(telemetry.rgbw)"></div>
+                </div>
+
+                <!-- Controls -->
+                <div class="controls">
+                  <button (click)="setNodeColor(node.node_id, 'red')">Red</button>
+                  <button (click)="setNodeColor(node.node_id, 'green')">Green</button>
+                  <button (click)="setNodeColor(node.node_id, 'blue')">Blue</button>
+                  <button (click)="setNodeColor(node.node_id, 'white')">White</button>
+                  <button (click)="turnOff(node.node_id)">Off</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Real-time Updates -->
+          <div class="realtime-section">
+            <h3>Real-time Telemetry</h3>
+            <p>Updates received: {{ telemetryCount() }}</p>
+            <p>Last update: {{ lastUpdate() }}</p>
+          </div>
         </div>
-      </div>
+      </ng-container>
+
+      <!-- Notice shown when not fully connected to avoid placeholders -->
+      <ng-template #connectionNotice>
+        <div class="status-bar">
+          <h3>Waiting for connections…</h3>
+          <div class="connections">
+            <span [class.connected]="data.apiHealthy()">API: {{ data.apiHealthy() ? '✓' : '✗' }}</span>
+            <span [class.connected]="data.wsConnected()">WebSocket: {{ data.wsConnected() ? '✓' : '✗' }}</span>
+            <span [class.connected]="data.mqttConnected()">MQTT: {{ data.mqttConnected() ? '✓' : '✗' }}</span>
+          </div>
+          <p style="margin-top:10px;opacity:0.8">UI elements are hidden until all connections are live to avoid placeholders.</p>
+        </div>
+      </ng-template>
     </div>
   `,
   styles: [`
@@ -320,7 +336,7 @@ export class ExampleDashboardComponent implements OnDestroy {
     const siteId = this.data.activeSiteId();
     if (!siteId) return '';
     
-    const site = this.data.sites().find(s => s._id === siteId);
+    const site = this.data.sites().find((s: Site) => s._id === siteId);
     return site?.name || siteId;
   }
 
@@ -329,6 +345,21 @@ export class ExampleDashboardComponent implements OnDestroy {
    */
   getNodesList(): Node[] {
     return Array.from(this.data.nodes().values());
+  }
+
+  /**
+   * Only show nodes that are actually connected (status online or seen recently or have live telemetry)
+   */
+  getConnectedNodesList(): Node[] {
+    const all = this.getNodesList();
+    const now = Date.now();
+    const recentMs = 1000 * 10; // within last 10 seconds
+    const hasLiveTelemetry = (nodeId: string) => !!this.data.getNodeTelemetry(nodeId);
+    return all.filter(n => {
+      const online = n.status === 'online';
+      const recent = (n as any).last_seen ? (now - new Date((n as any).last_seen).getTime()) < recentMs : false;
+      return online || recent || hasLiveTelemetry(n.node_id);
+    });
   }
 
   /**

@@ -1,6 +1,10 @@
 package types
 
-import "time"
+import (
+	"time"
+
+	"go.mongodb.org/mongo-driver/bson/primitive"
+)
 
 type StatusMode string
 
@@ -45,6 +49,28 @@ type Telemetry struct {
 	Ts       time.Time `bson:"ts" json:"ts"`
 	DeviceId string    `bson:"device_id" json:"device_id"`
 	Payload  string    `bson:"payload" json:"payload"`
+}
+
+type MmwaveTarget struct {
+	ID           int     `bson:"id" json:"id"`
+	DistanceMM   int     `bson:"distance_mm" json:"distance_mm"`
+	SpeedCmS     int     `bson:"speed_cm_s" json:"speed_cm_s"`
+	ResolutionMM int     `bson:"resolution_mm" json:"resolution_mm"`
+	PositionXMM  int     `bson:"position_x_mm" json:"position_x_mm"`
+	PositionYMM  int     `bson:"position_y_mm" json:"position_y_mm"`
+	VelocityXMPS float32 `bson:"velocity_x_m_s" json:"velocity_x_m_s"`
+	VelocityYMPS float32 `bson:"velocity_y_m_s" json:"velocity_y_m_s"`
+}
+
+type MmwaveFrame struct {
+	ID            primitive.ObjectID `bson:"_id,omitempty" json:"id"`
+	SiteId        string             `bson:"site_id" json:"site_id"`
+	CoordinatorId string             `bson:"coordinator_id" json:"coordinator_id"`
+	SensorId      string             `bson:"sensor_id" json:"sensor_id"`
+	Presence      bool               `bson:"presence" json:"presence"`
+	Confidence    float32            `bson:"confidence" json:"confidence"`
+	Targets       []MmwaveTarget     `bson:"targets" json:"targets"`
+	Timestamp     time.Time          `bson:"timestamp" json:"timestamp"`
 }
 
 type TargetType string

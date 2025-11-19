@@ -11,7 +11,8 @@ import {
   StartOTARequest,
   HealthStatus,
   GoogleHomeDevice,
-  GoogleHomeState
+  GoogleHomeState,
+  MmwaveFrame
 } from '../models/api.models';
 import { EnvironmentService } from './environment.service';
 
@@ -145,6 +146,34 @@ export class ApiService {
     return this.post<any>('/google/home/request-sync', {
       user_id: userId
     });
+  }
+
+  // ============================================================================
+  // mmWave API
+  // ============================================================================
+
+  /**
+   * Retrieve mmWave history with optional filtering
+   */
+  getMmwaveHistory(params?: { siteId?: string; coordinatorId?: string; limit?: number }): Observable<MmwaveFrame[]> {
+    const search = new URLSearchParams();
+
+    if (params?.siteId) {
+      search.set('site_id', params.siteId);
+    }
+
+    if (params?.coordinatorId) {
+      search.set('coord_id', params.coordinatorId);
+    }
+
+    if (params?.limit && params.limit > 0) {
+      search.set('limit', params.limit.toString());
+    }
+
+    const query = search.toString();
+    const suffix = query ? `?${query}` : '';
+
+    return this.get<MmwaveFrame[]>(`/mmwave/history${suffix}`);
   }
 
   // ============================================================================

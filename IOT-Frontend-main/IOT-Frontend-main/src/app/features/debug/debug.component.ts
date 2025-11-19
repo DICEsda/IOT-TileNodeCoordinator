@@ -736,6 +736,15 @@ export class DebugComponent implements OnInit, OnDestroy {
           this.addTelemetryMessage('MQTT', `site/${siteId}/node/+/telemetry`, data);
         }
       });
+
+    // Subscribe to mmWave frames from any coordinator
+    this.mqttService.subscribe(`site/${siteId}/coord/+/mmwave`)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe((data: any) => {
+        if (this.monitoring()) {
+          this.addTelemetryMessage('MQTT', `site/${siteId}/coord/+/mmwave`, data);
+        }
+      });
   }
 
   stopMonitoring() {

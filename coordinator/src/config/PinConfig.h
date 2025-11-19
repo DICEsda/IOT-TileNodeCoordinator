@@ -5,8 +5,9 @@
 // ESP32-S3-DevKitC-1 Pin Configuration
 namespace Pins {
     // UART for mmWave Sensor
-    constexpr uint8_t MMWAVE_RX = 18;    // UART1 RX (was 18 on both)
-    constexpr uint8_t MMWAVE_TX = 17;    // UART1 TX (S3 uses GPIO17)
+    // HLK-LD2450 wiring (Sensor TX -> ESP32 RX pin, Sensor RX -> ESP32 TX pin)
+    constexpr uint8_t MMWAVE_RX = 44;    // UART1 RX (GPIO44)
+    constexpr uint8_t MMWAVE_TX = 43;    // UART1 TX (GPIO43)
     
     // Status LEDs (external SK6812B addressable strip)
     constexpr uint8_t STATUS_LED = 15;   // Data pin for SK6812B strip on GPIO15
@@ -28,6 +29,9 @@ namespace Pins {
         constexpr uint8_t SPI_MISO = 13;     // SPI MISO
         constexpr uint8_t SPI_MOSI = 11;     // SPI MOSI
         constexpr uint8_t SPI_CS = 10;       // SPI Chip Select
+
+        // Analog ambient light sensor input (resistor divider to VDD)
+        constexpr uint8_t AMBIENT_LIGHT_ADC = 5; // GPIO5 supports ADC1_CH4 on S3
     }
     
     // Debug UART (USB CDC)
@@ -51,7 +55,7 @@ namespace Pins {
     // mmWave UART Configuration
     namespace MmWave {
         static constexpr uint8_t UART_NUM = 1;
-        static constexpr uint32_t BAUD_RATE = 115200;
-    static constexpr uint16_t RX_BUF_SIZE = 256;
+        static constexpr uint32_t BAUD_RATE = 256000;
+        static constexpr uint16_t RX_BUF_SIZE = 512;
     }
 }

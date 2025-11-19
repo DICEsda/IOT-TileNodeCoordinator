@@ -15,6 +15,10 @@ type Repository interface {
 	GetNodeById(id string) (*types.Node, error)
 	UpsertNode(ctx context.Context, node *types.Node) error
 
+	// mmWave operations
+	InsertMmwaveFrame(ctx context.Context, frame *types.MmwaveFrame) error
+	GetMmwaveFrames(ctx context.Context, siteId string, coordinatorId string, limit int) ([]types.MmwaveFrame, error)
+
 	// OTA operations
 	GetOTAJobById(id string) (*types.OTAJob, error)
 	CreateOTAJob(ctx context.Context, job *types.OTAJob) error
