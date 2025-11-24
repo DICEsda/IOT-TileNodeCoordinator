@@ -1,0 +1,423 @@
+<div class="settings-container">
+  <div class="settings-header card">
+    <h2>System Settings</h2>
+    <div class="header-actions">
+      <button class="button button-primary" (click)="saveSettings()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+          <polyline points="17 21 17 13 7 13 7 21"/>
+          <polyline points="7 3 7 8 15 8"/>
+        </svg>
+        Save Changes
+      </button>
+    </div>
+  </div>
+
+  <div class="settings-grid">
+    
+    <!-- Coordinator Control -->
+    <div class="settings-section card">
+      <h3>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 2l9 4.9V12c0 5.25-3.6 10.17-9 11.4-5.4-1.23-9-6.15-9-11.4V6.9L12 2z"/>
+        </svg>
+        Coordinator Control
+      </h3>
+
+      <div class="coordinator-info">
+        <div class="info-row">
+          <span class="label">Coordinator ID:</span>
+          <span class="value">{{ coordinatorId }}</span>
+        </div>
+        <div class="info-row">
+          <span class="label">Status:</span>
+          <span class="value" [class.online]="coordinatorOnline()">
+            {{ coordinatorOnline() ? 'Online' : 'Offline' }}
+          </span>
+        </div>
+        <div class="info-row">
+          <span class="label">Firmware:</span>
+          <span class="value">{{ firmwareVersion }}</span>
+        </div>
+      </div>
+
+      <div class="control-buttons">
+        <button 
+          class="button button-primary"
+          (click)="enterPairingMode()"
+          [disabled]="!coordinatorOnline() || pairingMode()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="8" x2="12" y2="16"/>
+            <line x1="8" y1="12" x2="16" y2="12"/>
+          </svg>
+          {{ pairingMode() ? 'Pairing Mode Active...' : 'Enter Pairing Mode' }}
+        </button>
+        
+        <button 
+          class="button"
+          (click)="restartCoordinator()"
+          [disabled]="!coordinatorOnline()"
+          style="background: var(--bg-tertiary); color: var(--text-secondary);">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="23 4 23 10 17 10"/>
+            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+          </svg>
+          Restart Coordinator
+        </button>
+      </div>
+
+      <div class="setting-item" *ngIf="pairingMode()">
+        <div class="pairing-countdown">
+          <p>Pairing mode active for {{ pairingTimeLeft }}s</p>
+          <div class="progress-bar">
+            <div class="progress-fill" [style.width.%]="pairingProgress()"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Node Management -->
+    <div class="settings-section card">
+      <h3>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="4" y="4" width="16" height="16" rx="2"/>
+          <circle cx="12" cy="12" r="3"/>
+        </svg>
+        Node Management
+      </h3>
+
+      <div *ngIf="!node(); else nodeManagement" class="empty-state-inline">
+        <p>No node paired yet</p>
+        <button class="button button-primary" (click)="enterPairingMode()">
+          Pair a Node
+        </button>
+      </div>
+
+      <ng-template #nodeManagement>
+        <div class="node-card">
+          <div class="node-header">
+            <div class="node-info">
+              <h4>{{ node()?.name || node()?.node_id }}</h4>
+              <span class="node-status" [class]="node()?.status">
+                {{ node()?.status || 'offline' }}
+              </span>
+            </div>
+            <button 
+              class="button button-danger"
+              (click)="deleteNode()"
+              title="Remove Node">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="3 6 5 6 21 6"/>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+              </svg>
+            </button>
+          </div>
+
+          <div class="node-controls">
+            <div class="setting-item">
+              <label>Zone Assignment</label>
+              <select [(ngModel)]="nodeZone" (change)="updateNodeZone()" class="zone-select">
+                <option value="">No Zone</option>
+                <option *ngFor="let zone of zones" [value]="zone">{{ zone }}</option>
+              </select>
+            </div>
+
+            <div class="setting-item">
+              <label>Node Name</label>
+              <input 
+                type="text" 
+                [(ngModel)]="nodeName"
+                (blur)="updateNodeName()"
+                placeholder="Enter node name"
+                class="text-input">
+            </div>
+
+            <div class="setting-item">
+              <label>LED Color Test</label>
+              <div class="color-picker-wrapper">
+                <input 
+                  type="color" 
+                  [(ngModel)]="testColor"
+                  (change)="sendTestColor()"
+                  class="color-picker">
+                <button 
+                  class="button"
+                  (click)="turnOffLEDs()"
+                  style="background: var(--bg-tertiary); margin-left: 0.5rem;">
+                  Turn Off
+                </button>
+              </div>
+            </div>
+
+            <div class="setting-item">
+              <label>Brightness: {{ nodeBrightness }}%</label>
+              <input 
+                type="range" 
+                min="0" 
+                max="100" 
+                [(ngModel)]="nodeBrightness"
+                (change)="updateBrightness()"
+                class="slider">
+            </div>
+          </div>
+        </div>
+      </ng-template>
+    </div>
+
+    <!-- Zone Management -->
+    <div class="settings-section card">
+      <h3>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
+          <circle cx="12" cy="10" r="3"/>
+        </svg>
+        Zone Management
+      </h3>
+
+      <div class="zone-list">
+        <div *ngFor="let zone of zones; let i = index" class="zone-item">
+          <input 
+            type="text" 
+            [(ngModel)]="zones[i]"
+            class="zone-input">
+          <button 
+            class="button button-danger-outline"
+            (click)="removeZone(i)"
+            title="Remove Zone">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="6" x2="6" y2="18"/>
+              <line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <button class="button" (click)="addZone()" style="margin-top: 1rem; width: 100%;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="12" y1="5" x2="12" y2="19"/>
+          <line x1="5" y1="12" x2="19" y2="12"/>
+        </svg>
+        Add Zone
+      </button>
+    </div>
+
+    <!-- WiFi Configuration -->
+    <div class="settings-section card">
+      <h3>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M5 12.55a11 11 0 0 1 14.08 0"/>
+          <path d="M1.42 9a16 16 0 0 1 21.16 0"/>
+          <path d="M8.53 16.11a6 6 0 0 1 6.95 0"/>
+          <line x1="12" y1="20" x2="12.01" y2="20"/>
+        </svg>
+        WiFi Configuration
+      </h3>
+
+      <div class="setting-item">
+        <label>WiFi SSID</label>
+        <input 
+          type="text" 
+          [(ngModel)]="wifiSSID"
+          placeholder="Enter WiFi network name"
+          class="text-input">
+      </div>
+
+      <div class="setting-item">
+        <label>WiFi Password</label>
+        <input 
+          type="password" 
+          [(ngModel)]="wifiPassword"
+          placeholder="Enter WiFi password"
+          class="text-input">
+      </div>
+
+      <button 
+        class="button button-primary"
+        (click)="updateWiFiConfig()"
+        style="width: 100%; margin-top: 0.5rem;">
+        Update WiFi Settings
+      </button>
+    </div>
+
+    <!-- MQTT Configuration -->
+    <div class="settings-section card">
+      <h3>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+        </svg>
+        MQTT Configuration
+      </h3>
+
+      <div class="setting-item">
+        <label>MQTT Broker</label>
+        <input 
+          type="text" 
+          [(ngModel)]="mqttBroker"
+          placeholder="tcp://mosquitto:1883"
+          class="text-input">
+      </div>
+
+      <div class="setting-item">
+        <label>MQTT Username</label>
+        <input 
+          type="text" 
+          [(ngModel)]="mqttUsername"
+          placeholder="Enter username"
+          class="text-input">
+      </div>
+
+      <div class="setting-item">
+        <label>MQTT Password</label>
+        <input 
+          type="password" 
+          [(ngModel)]="mqttPassword"
+          placeholder="Enter password"
+          class="text-input">
+      </div>
+    </div>
+
+    <!-- Google Home Integration -->
+    <div class="settings-section card">
+      <h3>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+          <polyline points="9 22 9 12 15 12 15 22"/>
+        </svg>
+        Google Home Integration
+      </h3>
+
+      <div class="setting-item">
+        <div class="setting-info">
+          <label>Enable Google Home</label>
+          <p>Control lights with Google Assistant</p>
+        </div>
+        <div
+          class="toggle-switch"
+          [class.active]="googleHomeEnabled"
+          (click)="googleHomeEnabled = !googleHomeEnabled">
+        </div>
+      </div>
+
+      <div *ngIf="googleHomeEnabled" class="google-config">
+        <div class="setting-item">
+          <label>Project ID</label>
+          <input 
+            type="text" 
+            [(ngModel)]="googleProjectId"
+            placeholder="your-google-cloud-project-id"
+            class="text-input">
+        </div>
+
+        <div class="setting-item">
+          <label>Client ID</label>
+          <input 
+            type="text" 
+            [(ngModel)]="googleClientId"
+            placeholder="your-client-id.apps.googleusercontent.com"
+            class="text-input">
+        </div>
+
+        <div class="setting-item">
+          <label>Client Secret</label>
+          <input 
+            type="password" 
+            [(ngModel)]="googleClientSecret"
+            placeholder="Enter client secret"
+            class="text-input">
+        </div>
+
+        <div class="setting-item">
+          <label>API Key</label>
+          <input 
+            type="text" 
+            [(ngModel)]="googleApiKey"
+            placeholder="Enter API key"
+            class="text-input">
+        </div>
+
+        <div class="connection-status" *ngIf="googleHomeEnabled">
+          <span class="status-indicator" [class.connected]="googleHomeConnected">
+            {{ googleHomeConnected ? 'Connected' : 'Not Connected' }}
+          </span>
+          <button 
+            *ngIf="!googleHomeConnected"
+            class="button button-primary"
+            (click)="connectGoogleHome()">
+            Link Account
+          </button>
+          <button 
+            *ngIf="googleHomeConnected"
+            class="button"
+            (click)="disconnectGoogleHome()"
+            style="background: var(--accent-danger);">
+            Unlink Account
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- System Configuration -->
+    <div class="settings-section card">
+      <h3>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M12 1v6m0 6v6M5.64 5.64l4.24 4.24m4.24 4.24l4.24 4.24M1 12h6m6 0h6M5.64 18.36l4.24-4.24m4.24-4.24l4.24-4.24"/>
+        </svg>
+        System Configuration
+      </h3>
+
+      <div class="setting-item">
+        <div class="setting-info">
+          <label>Automatic Mode</label>
+          <p>Automatically control lights based on motion detection</p>
+        </div>
+        <div
+          class="toggle-switch"
+          [class.active]="autoMode"
+          (click)="autoMode = !autoMode">
+        </div>
+      </div>
+
+      <div class="setting-item">
+        <div class="setting-info">
+          <label>Motion Sensitivity</label>
+          <p>Adjust sensor sensitivity ({{ motionSensitivity }}%)</p>
+        </div>
+        <input
+          type="range"
+          min="0"
+          max="100"
+          [(ngModel)]="motionSensitivity"
+          class="slider">
+      </div>
+
+      <div class="setting-item">
+        <div class="setting-info">
+          <label>Light Intensity</label>
+          <p>Default brightness level ({{ lightIntensity }}%)</p>
+        </div>
+        <input
+          type="range"
+          min="0"
+          max="100"
+          [(ngModel)]="lightIntensity"
+          class="slider">
+      </div>
+
+      <div class="setting-item">
+        <div class="setting-info">
+          <label>Auto-off Delay</label>
+          <p>Time before lights turn off ({{ autoOffDelay }} seconds)</p>
+        </div>
+        <input
+          type="number"
+          min="5"
+          max="300"
+          [(ngModel)]="autoOffDelay"
+          class="number-input">
+      </div>
+    </div>
+
+  </div>
+</div>

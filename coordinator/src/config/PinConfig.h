@@ -20,18 +20,15 @@ namespace Pins {
     
     // Optional External Sensors
     namespace External {
-        // I2C Bus (for optional sensors)
-        constexpr uint8_t I2C_SDA = 8;       // I2C SDA
-        constexpr uint8_t I2C_SCL = 9;       // I2C SCL
+        // I2C Bus (for optional sensors - TSL2561 Lux Sensor)
+        constexpr uint8_t I2C_SDA = 16;      // I2C SDA
+        constexpr uint8_t I2C_SCL = 17;      // I2C SCL
         
         // SPI Bus (for optional sensors)
         constexpr uint8_t SPI_SCK = 12;      // SPI Clock
         constexpr uint8_t SPI_MISO = 13;     // SPI MISO
         constexpr uint8_t SPI_MOSI = 11;     // SPI MOSI
         constexpr uint8_t SPI_CS = 10;       // SPI Chip Select
-
-        // Analog ambient light sensor input (resistor divider to VDD)
-        constexpr uint8_t AMBIENT_LIGHT_ADC = 5; // GPIO5 supports ADC1_CH4 on S3
     }
     
     // Debug UART (USB CDC)

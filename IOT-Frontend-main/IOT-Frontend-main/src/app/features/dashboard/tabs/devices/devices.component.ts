@@ -1,4 +1,4 @@
-import { CommonModule } from '@angular/common';
+import { CommonModule, DecimalPipe } from '@angular/common';
 import { Component, OnInit, effect, inject, signal } from '@angular/core';
 import { Coordinator, Node } from '../../../../core/models/api.models';
 import { DataService } from '../../../../core/services/data.service';
@@ -12,7 +12,7 @@ interface SensorRow {
 
 @Component({
   selector: 'app-devices',
-  imports: [CommonModule],
+  imports: [CommonModule, DecimalPipe],
   templateUrl: './devices.component.html',
   styleUrl: './devices.component.scss'
 })
@@ -158,6 +158,36 @@ export class DevicesComponent implements OnInit {
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
     return `${hours}h ${minutes}m`;
+  }
+
+  currentLedColor = '#000000';
+
+  onLedColorChange(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    this.currentLedColor = input.value;
+    
+    const r = parseInt(this.currentLedColor.substr(1, 2), 16);
+    const g = parseInt(this.currentLedColor.substr(3, 2), 16);
+    const b = parseInt(this.currentLedColor.substr(5, 2), 16);
+    
+    const coord = this.coordinator();
+    if (coord) {
+      this.data.setCoordinatorLight(coord.site_id, coord.coord_id, { r, g, b });
+    }
+  }
+
+  resetLed(): void {
+    const coord = this.coordinator();
+    if (coord) {
+      this.data.resetCoordinatorLight(coord.site_id, coord.coord_id);
+    }
+  }
+
+  startPairing(): void {
+    const coord = this.coordinator();
+    if (coord) {
+      this.data.startPairing(coord.site_id, coord.coord_id);
+    }
   }
 }
 

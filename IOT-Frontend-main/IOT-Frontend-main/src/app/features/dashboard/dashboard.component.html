@@ -55,6 +55,15 @@
         </button>
         <button
           class="tab-button"
+          [class.active]="activeTab() === 'customize'"
+          (click)="setActiveTab('customize')">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+          </svg>
+          Customize
+        </button>
+        <button
+          class="tab-button"
           [class.active]="activeTab() === 'settings'"
           (click)="setActiveTab('settings')">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -67,9 +76,28 @@
 
       <div class="header-info">
         <span class="time">{{ getCurrentTime() }}</span>
-        <div class="status-indicator">
-          <span class="status-dot active"></span>
-          <span>System Active</span>
+        <div class="health-indicators">
+          <div class="health-item" [class.healthy]="data.apiHealthy()" title="Backend API">
+            <span class="health-dot" [class.active]="data.apiHealthy()"></span>
+            <span class="health-label">API</span>
+          </div>
+          <div class="health-item" [class.healthy]="data.dbHealthy()" title="MongoDB Database">
+            <span class="health-dot" [class.active]="data.dbHealthy()"></span>
+            <span class="health-label">DB</span>
+          </div>
+          <div class="health-item" [class.healthy]="data.mqttBrokerHealthy()" title="MQTT Broker">
+            <span class="health-dot" [class.active]="data.mqttBrokerHealthy()"></span>
+            <span class="health-label">MQTT</span>
+          </div>
+          <div class="health-item" [class.healthy]="data.coordOnline()" title="Coordinator Status">
+            <span class="health-dot" [class.active]="data.coordOnline()"></span>
+            <span class="health-label">Coordinator</span>
+          </div>
+          <div class="divider"></div>
+          <div class="status-indicator" [class.active]="isHealthy()">
+            <span class="status-dot" [class.active]="isHealthy()"></span>
+            <span>{{ isHealthy() ? 'System Active' : 'System Degraded' }}</span>
+          </div>
         </div>
       </div>
     </div>
@@ -79,11 +107,29 @@
   <main class="tab-content" *ngIf="isHealthy(); else connectionNotice">
     @if (activeTab() === 'monitor') {
       <div class="monitor-layout">
-        <div class="visualizer-section">
-          <app-room-visualizer (lightStateChanged)="onLightStateChanged($event)"></app-room-visualizer>
+        <!-- Top Section: Radar & Light Monitor -->
+        <div class="bottom-section">
+          <div class="visualizer-section">
+            <app-room-visualizer 
+              (lightStateChanged)="onLightStateChanged($event)"
+              [registeredNodes]="registeredNodes()">
+            </app-room-visualizer>
+          </div>
+          <div class="monitor-section">
+            <app-light-monitor 
+              [totalActiveLights]="totalActiveLights()" 
+              [lightNodeStates]="lightNodeStates()"
+              [registeredNodes]="registeredNodes()">
+            </app-light-monitor>
+          </div>
         </div>
-        <div class="monitor-section">
-          <app-light-monitor [totalActiveLights]="totalActiveLights()" [lightNodeStates]="lightNodeStates()"></app-light-monitor>
+
+        <!-- Network Graph (Bottom) -->
+        <div class="graph-section">
+          <app-network-graph
+            [nodes]="registeredNodes()"
+            [coordinators]="registeredCoordinators()">
+          </app-network-graph>
         </div>
       </div>
     }
@@ -96,8 +142,11 @@
     @if (activeTab() === 'calibrate') {
       <app-calibrate></app-calibrate>
     }
+    @if (activeTab() === 'customize') {
+      <app-customize></app-customize>
+    }
     @if (activeTab() === 'settings') {
-      <app-settings></app-settings>
+      <app-settings-new></app-settings-new>
     }
   </main>
 

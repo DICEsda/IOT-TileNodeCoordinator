@@ -105,7 +105,8 @@ bool Mqtt::begin() {
     warnIfLoopbackHost();
 
     if (coordId.isEmpty()) {
-        coordId = WiFi.macAddress();
+        coordId = "coord001";  // Default to coord001 for frontend compatibility
+        Logger::info("No coordinator ID set, using default: coord001");
     }
 
     // Setup MQTT client
@@ -136,10 +137,21 @@ void Mqtt::loop() {
 
     if (!mqttClient.connected()) {
         static uint32_t lastReconnect = 0;
+        static uint32_t failedAttempts = 0;
         uint32_t now = millis();
         if (now - lastReconnect > 5000) {
             lastReconnect = now;
-            connectMqtt();
+            if (!connectMqtt()) {
+                failedAttempts++;
+                // After 6 failed attempts (30 seconds), try rediscovery
+                if (failedAttempts >= 6) {
+                    Logger::info("Multiple MQTT failures - attempting rediscovery");
+                    discoveryAttempted = false; // Reset flag to allow rediscovery
+                    failedAttempts = 0;
+                }
+            } else {
+                failedAttempts = 0; // Reset on success
+            }
         }
     }
 
@@ -287,6 +299,21 @@ bool Mqtt::connectMqtt() {
     if (!wifiReady) {
         Logger::warn("MQTT connect skipped - Wi-Fi unavailable");
         return false;
+    }
+    
+    // Check if stored broker IP is on same subnet, if not trigger rediscovery
+    if (!brokerHost.isEmpty() && configLoaded) {
+        IPAddress brokerIP;
+        if (brokerIP.fromString(brokerHost)) {
+            IPAddress local = WiFi.localIP();
+            IPAddress mask = WiFi.subnetMask();
+            uint32_t localNet = (uint32_t)local & (uint32_t)mask;
+            uint32_t brokerNet = (uint32_t)brokerIP & (uint32_t)mask;
+            if (localNet != brokerNet) {
+                Logger::warn("Broker %s not on current subnet - triggering rediscovery", brokerHost.c_str());
+                discoveryAttempted = false;
+            }
+        }
     }
     
     warnIfLoopbackHost();
@@ -466,36 +493,35 @@ bool Mqtt::autoDiscoverBroker() {
         return false;
     }
 
-    if (gateway && tryBrokerCandidate(gateway)) {
-        brokerHost = gateway.toString();
-        persistConfig();
-        return true;
+    // Priority 1: Try gateway (often the mobile hotspot host running Docker)
+    if (gateway && (uint32_t)gateway != 0) {
+        Logger::info("Trying gateway %s as MQTT broker...", gateway.toString().c_str());
+        if (tryBrokerCandidate(gateway)) {
+            brokerHost = gateway.toString();
+            persistConfig();
+            Logger::info("MQTT broker found at gateway: %s", brokerHost.c_str());
+            return true;
+        }
     }
 
-    uint32_t ip = (uint32_t)local;
-    uint32_t mask = (uint32_t)subnet;
-    uint32_t network = ip & mask;
-    uint32_t broadcast = network | ~mask;
-    if (broadcast <= network + 1) {
-        return false;
-    }
+    // Priority 2: Scan local subnet (limit to reasonable range)
+    // We iterate the last octet (1-254) to avoid endianness issues with uint32_t arithmetic on ESP32
+    const uint32_t hostCount = 254;
 
-    uint32_t hostCount = broadcast - network - 1;
-    const uint32_t maxScan = 256; // limit scan time
-    if (hostCount > maxScan) {
-        hostCount = maxScan;
-    }
-
-    Logger::info("Scanning %u LAN hosts for MQTT (port %u)...", hostCount, brokerPort);
-    uint32_t start = network + 1;
-    uint32_t localIndex = (ip > start) ? (ip - start) : 0;
-
-    for (uint32_t i = 0; i < hostCount; ++i) {
-        uint32_t offset = (localIndex + i) % hostCount;
-        IPAddress candidate(start + offset);
+    Logger::info("Scanning %u nearby hosts for MQTT (this may take 15-30s)...", hostCount);
+    
+    for (uint32_t i = 1; i <= hostCount; ++i) {
+        IPAddress candidate = local;
+        candidate[3] = i; // Iterate the last octet
+        
         if (candidate == local || candidate == gateway) {
             continue;
         }
+        // Provide visual feedback every 20 hosts
+        if (i % 20 == 0) {
+             Logger::debug("Scanning... %s", candidate.toString().c_str());
+        }
+        
         if (tryBrokerCandidate(candidate)) {
             brokerHost = candidate.toString();
             persistConfig();
@@ -504,13 +530,13 @@ bool Mqtt::autoDiscoverBroker() {
         }
     }
 
-    Logger::warn("No MQTT broker responded on the local subnet");
+    Logger::warn("No MQTT broker found on network");
     return false;
 }
 
 bool Mqtt::tryBrokerCandidate(const IPAddress& candidate) {
     WiFiClient probe;
-    constexpr uint32_t timeoutMs = 250;
+    constexpr uint32_t timeoutMs = 100; // Reduced from 250ms for faster full-subnet scan
     if (!probe.connect(candidate, brokerPort, timeoutMs)) {
         return false;
     }
@@ -627,8 +653,10 @@ void Mqtt::publishCoordinatorTelemetry(const CoordinatorSensorSnapshot& snapshot
     StaticJsonDocument<256> doc;
     uint32_t ts = snapshot.timestampMs ? snapshot.timestampMs : millis();
     doc["ts"] = ts / 1000;
+    doc["site_id"] = siteId;
+    doc["coord_id"] = coordId.length() ? coordId : WiFi.macAddress();
     doc["light_lux"] = snapshot.lightLux;
-    doc["temp_c"] = snapshot.temperatureC;
+    doc["temp_c"] = snapshot.tempC;
     doc["mmwave_presence"] = snapshot.mmWavePresence;
     doc["mmwave_confidence"] = snapshot.mmWaveConfidence;
     doc["mmwave_online"] = snapshot.mmWaveOnline;
@@ -639,6 +667,20 @@ void Mqtt::publishCoordinatorTelemetry(const CoordinatorSensorSnapshot& snapshot
     mqttClient.publish(coordinatorTelemetryTopic().c_str(), payload.c_str());
 }
 
+void Mqtt::publishSerialLog(const String& message, const String& level, const String& tag) {
+    if (!mqttClient.connected()) return;
+    StaticJsonDocument<512> doc;
+    doc["ts"] = millis() / 1000;
+    doc["message"] = message;
+    doc["level"] = level;
+    if (tag.length() > 0) {
+        doc["tag"] = tag;
+    }
+    String payload;
+    serializeJson(doc, payload);
+    mqttClient.publish(coordinatorSerialTopic().c_str(), payload.c_str());
+}
+
 String Mqtt::nodeTelemetryTopic(const String& nodeId) const {
     return "site/" + siteId + "/node/" + nodeId + "/telemetry";
 }
@@ -646,6 +688,11 @@ String Mqtt::nodeTelemetryTopic(const String& nodeId) const {
 String Mqtt::coordinatorTelemetryTopic() const {
     String id = coordId.length() ? coordId : WiFi.macAddress();
     return "site/" + siteId + "/coord/" + id + "/telemetry";
+}
+
+String Mqtt::coordinatorSerialTopic() const {
+    String id = coordId.length() ? coordId : WiFi.macAddress();
+    return "site/" + siteId + "/coord/" + id + "/serial";
 }
 
 String Mqtt::coordinatorCmdTopic() const {

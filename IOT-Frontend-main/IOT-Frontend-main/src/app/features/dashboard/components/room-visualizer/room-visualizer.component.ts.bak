@@ -1,0 +1,659 @@
+import { CommonModule, DatePipe, DecimalPipe } from '@angular/common';
+import { Component, ElementRef, EventEmitter, Input, OnDestroy, OnInit, Output, ViewChild, AfterViewInit } from '@angular/core';
+import { Subscription, firstValueFrom } from 'rxjs';
+import { MmwaveFrame, MmwaveTarget } from '../../../../core/models/api.models';
+import { ApiService } from '../../../../core/services/api.service';
+import { MqttService } from '../../../../core/services/mqtt.service';
+import { Chart, ChartConfiguration, registerables } from 'chart.js';
+
+Chart.register(...registerables);
+
+interface LightNodeState {
+  nodeId: number;
+  totalBulbs: number;
+  activeBulbs: number;
+}
+
+@Component({
+  selector: 'app-room-visualizer',
+  imports: [CommonModule, DatePipe, DecimalPipe],
+  templateUrl: './room-visualizer.component.html',
+  styleUrl: './room-visualizer.component.scss'
+})
+export class RoomVisualizerComponent implements OnInit, OnDestroy, AfterViewInit {
+  private static readonly NODE_BUCKETS = 6;
+  private static readonly LIGHTS_PER_NODE = 6;
+
+  @ViewChild('radarCanvas', { static: false }) canvasRef!: ElementRef<HTMLCanvasElement>;
+  @Input() siteId: string = 'site001';
+  @Input() coordinatorId: string = 'coord001';
+  @Output() lightStateChanged = new EventEmitter<{
+    totalActive: number;
+    nodeStates: LightNodeState[];
+  }>();
+
+  presenceDetected = false;
+  targetCount = 0;
+  lastUpdated: Date | null = null;
+  latestFrame: MmwaveFrame | null = null;
+  frames: MmwaveFrame[] = [];
+
+  private chart: Chart | null = null;
+  private mmwaveSubscription?: Subscription;
+  private mmwaveTopic?: string;
+
+  constructor(
+    private readonly api: ApiService,
+    private readonly mqtt: MqttService
+  ) {}
+
+  ngOnInit() {
+    this.emitLightState([]);
+    this.loadHistory();
+    this.subscribeToRealtime();
+  }
+
+  ngAfterViewInit() {
+    this.initChart();
+  }
+
+  ngOnDestroy() {
+    if (this.chart) {
+      this.chart.destroy();
+    }
+
+    if (this.mmwaveSubscription) {
+      this.mmwaveSubscription.unsubscribe();
+    }
+
+    if (this.mmwaveTopic) {
+      this.mqtt.unsubscribe(this.mmwaveTopic);
+    }
+  }
+
+  private initChart() {
+    const canvas = this.canvasRef?.nativeElement;
+    if (!canvas) return;
+
+    const config: ChartConfiguration<'scatter'> = {
+      type: 'scatter',
+      data: {
+        datasets: [{
+          label: 'Targets',
+          data: [],
+          backgroundColor: 'rgba(0, 255, 191, 0.8)',
+          borderColor: 'rgba(0, 255, 191, 1)',
+          pointRadius: 8,
+          pointHoverRadius: 12
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            display: false
+          },
+          tooltip: {
+            callbacks: {
+              label: (context) => {
+                const point = context.raw as any;
+                return `Target ${point.id}: (${point.x.toFixed(1)}m, ${point.y.toFixed(1)}m)`;
+              }
+            }
+          }
+        },
+        scales: {
+          x: {
+            type: 'linear',
+            min: -6,
+            max: 6,
+            title: {
+              display: true,
+              text: 'X Position (meters)',
+              color: 'rgba(0, 255, 191, 0.8)'
+            },
+            grid: {
+              color: 'rgba(0, 255, 191, 0.15)'
+            },
+            ticks: {
+              color: 'rgba(0, 255, 191, 0.6)'
+            }
+          },
+          y: {
+            type: 'linear',
+            min: 0,
+            max: 6,
+            title: {
+              display: true,
+              text: 'Y Position (meters)',
+              color: 'rgba(0, 255, 191, 0.8)'
+            },
+            grid: {
+              color: 'rgba(0, 255, 191, 0.15)'
+            },
+            ticks: {
+              color: 'rgba(0, 255, 191, 0.6)'
+            }
+          }
+        }
+      }
+    };
+
+    this.chart = new Chart(canvas, config);
+  }
+
+  private async loadHistory(): Promise<void> {
+    try {
+      const frames = await firstValueFrom(
+        this.api.getMmwaveHistory({
+          siteId: this.siteId,
+          coordinatorId: this.coordinatorId,
+          limit: 120
+        })
+      );
+
+      const normalized = frames
+        .map(frame => this.normalizeFrame(frame))
+        .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+
+      this.frames = normalized;
+
+      if (normalized.length > 0) {
+        this.applyFrame(normalized[0]);
+      }
+    } catch (error) {
+      console.error('[RoomVisualizer] Failed to load mmWave history', error);
+    }
+  }
+
+  private subscribeToRealtime(): void {
+    const topic = `site/${this.siteId}/coord/${this.coordinatorId}/mmwave`;
+    this.mmwaveTopic = topic;
+    const subject = this.mqtt.subscribeCoordinatorMmwave(this.siteId, this.coordinatorId);
+    this.mmwaveSubscription = subject.subscribe({
+      next: payload => {
+        const frame = this.normalizeLiveFrame(payload);
+        this.frames = [frame, ...this.frames].slice(0, 240);
+        this.applyFrame(frame);
+      },
+      error: err => console.error('[RoomVisualizer] MQTT mmWave error', err)
+    });
+  }
+
+  private setupCanvasSizing(): void {
+    const canvas = this.canvasRef.nativeElement;
+    const parent = canvas.parentElement ?? canvas;
+
+    const resize = () => {
+      const bounds = parent.getBoundingClientRect();
+      const width = Math.max(bounds.width || 600, 300);
+      const height = Math.max(bounds.height || 500, 300);
+      
+      console.log('[RoomVisualizer] Canvas resize:', { width, height, bounds });
+      
+      this.pixelRatio = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+
+      canvas.width = width * this.pixelRatio;
+      canvas.height = height * this.pixelRatio;
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
+
+      const context = this.ctx;
+      if (context) {
+        context.setTransform(1, 0, 0, 1, 0, 0);
+        context.scale(this.pixelRatio, this.pixelRatio);
+      }
+    };
+
+    resize();
+
+    if (typeof window !== 'undefined' && 'ResizeObserver' in window) {
+      this.resizeObserver = new ResizeObserver(() => resize());
+      this.resizeObserver.observe(parent);
+    } else {
+      const win = typeof window !== 'undefined' ? (window as Window) : undefined;
+      if (win) {
+        this.boundWindowResize = resize;
+        win.addEventListener('resize', resize as EventListener);
+      }
+    }
+  }
+
+  private normalizeFrame(frame: MmwaveFrame): MmwaveFrame {
+    const rawTimestamp = (frame as any).timestamp;
+    const timestamp = rawTimestamp instanceof Date
+      ? rawTimestamp
+      : rawTimestamp
+        ? new Date(rawTimestamp)
+        : new Date();
+
+    return {
+      ...frame,
+      timestamp,
+      targets: (frame.targets ?? []).map(target => {
+        const positionX = this.safeNumber(target.position_x_mm);
+        const positionY = this.safeNumber(target.position_y_mm);
+        const velocityX = this.safeNumber(target.velocity_x_m_s);
+        const velocityY = this.safeNumber(target.velocity_y_m_s);
+        const distance = target.distance_mm !== undefined
+          ? this.safeNumber(target.distance_mm)
+          : Math.sqrt(positionX * positionX + positionY * positionY);
+
+        return {
+          ...target,
+          distance_mm: distance,
+          position_x_mm: positionX,
+          position_y_mm: positionY,
+          velocity_x_m_s: velocityX,
+          velocity_y_m_s: velocityY
+        };
+      })
+    };
+  }
+
+  private normalizeLiveFrame(payload: any): MmwaveFrame {
+    const ts = typeof payload?.timestamp === 'string'
+      ? new Date(payload.timestamp)
+      : new Date(((payload?.ts ?? Date.now() / 1000) as number) * 1000);
+
+    const rawTargets = Array.isArray(payload?.targets) ? payload.targets : [];
+
+    const targets: MmwaveTarget[] = rawTargets.map((target: any) => {
+      const position = target.position_mm || {};
+      const velocity = target.velocity_m_s || {};
+
+      const positionX = this.safeNumber(target.position_x_mm ?? position.x);
+      const positionY = this.safeNumber(target.position_y_mm ?? position.y);
+
+      const velocityX = this.safeNumber(target.velocity_x_m_s ?? velocity.x);
+      const velocityY = this.safeNumber(target.velocity_y_m_s ?? velocity.y);
+
+      const defaultDistance = Math.sqrt(positionX ** 2 + positionY ** 2);
+
+      return {
+        id: Math.trunc(this.safeNumber(target.id, 0)),
+        distance_mm: target.distance_mm !== undefined ? this.safeNumber(target.distance_mm) : defaultDistance,
+        speed_cm_s: target.speed_cm_s !== undefined
+          ? this.safeNumber(target.speed_cm_s)
+          : Math.hypot(velocityX, velocityY) * 100,
+        resolution_mm: this.safeNumber(target.resolution_mm),
+        position_x_mm: positionX,
+        position_y_mm: positionY,
+        velocity_x_m_s: velocityX,
+        velocity_y_m_s: velocityY
+      };
+    });
+
+    return {
+      site_id: payload?.site_id ?? this.siteId,
+      coordinator_id: payload?.coord_id ?? payload?.coordinator_id ?? this.coordinatorId,
+      sensor_id: payload?.sensor_id ?? 'mmwave',
+      presence: Boolean(payload?.presence),
+      confidence: Number(payload?.confidence ?? 0),
+      targets,
+      timestamp: ts
+    };
+  }
+
+  private safeNumber(value: any, fallback = 0): number {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
+  private applyFrame(frame: MmwaveFrame): void {
+    this.latestFrame = frame;
+    this.presenceDetected = frame.presence;
+    this.targetCount = frame.targets.length;
+    this.lastUpdated = frame.timestamp;
+
+    this.updateChart(frame.targets);
+    this.emitLightState(frame.targets);
+  }
+
+  private updateChart(targets: MmwaveTarget[]): void {
+    if (!this.chart) return;
+
+    const dataPoints = targets.map(target => ({
+      x: (target.position_x_mm || 0) / 1000, // Convert mm to meters
+      y: (target.position_y_mm || 0) / 1000,
+      id: target.id
+    }));
+
+    this.chart.data.datasets[0].data = dataPoints;
+    this.chart.update('none'); // Update without animation for real-time feel
+  }
+
+  private emitLightState(targets: MmwaveTarget[]): void {
+    const buckets = Array.from({ length: RoomVisualizerComponent.NODE_BUCKETS }, (_, index) => ({
+      nodeId: index + 1,
+      totalBulbs: RoomVisualizerComponent.LIGHTS_PER_NODE,
+      activeBulbs: 0
+    }));
+
+    const segmentSize = (Math.PI * 2) / RoomVisualizerComponent.NODE_BUCKETS;
+
+    targets.forEach(target => {
+      const angle = Math.atan2(target.position_y_mm ?? 0, target.position_x_mm ?? 0);
+      const normalized = (angle + Math.PI * 2) % (Math.PI * 2);
+      const bucketIndex = Math.min(
+        RoomVisualizerComponent.NODE_BUCKETS - 1,
+        Math.floor(normalized / segmentSize)
+      );
+
+      buckets[bucketIndex].activeBulbs = Math.min(
+        RoomVisualizerComponent.LIGHTS_PER_NODE,
+        buckets[bucketIndex].activeBulbs + 1
+      );
+    });
+
+    this.lightStateChanged.emit({
+      totalActive: targets.length,
+      nodeStates: buckets
+    });
+  }
+
+  private renderRadar = () => {
+    this.animationId = requestAnimationFrame(this.renderRadar);
+
+    const ctx = this.ctx;
+    if (!ctx) {
+      return;
+    }
+
+    const canvas = this.canvasRef.nativeElement;
+    const width = canvas.width / this.pixelRatio;
+    const height = canvas.height / this.pixelRatio;
+    
+    // Ensure we have valid dimensions
+    if (width <= 0 || height <= 0 || width < 100 || height < 100) {
+      return;
+    }
+    
+    // Make the cone longer - use more of the height, ensure minimum radius
+    const radius = Math.max(100, Math.min(width * 0.5, height * 0.85));
+    const now = Date.now();
+
+    // Create new wave rings periodically
+    if (now - this.lastWaveTime > 1500) {
+      this.waveRings.push({ radius: 0, opacity: 1, timestamp: now });
+      this.lastWaveTime = now;
+    }
+
+    ctx.save();
+    ctx.clearRect(0, 0, width, height);
+    this.drawBackground(width, height, radius);
+    
+    // Position origin at bottom center - closer to edge for longer cone
+    ctx.translate(width / 2, height - 30);
+    
+    try {
+      this.drawGrid3D(radius);
+      this.updateAndDrawWaves(radius);
+      this.drawSensorCore(radius);
+      this.decayTrail();
+      this.drawTargets3D(radius);
+    } catch (err) {
+      console.error('[RoomVisualizer] Render error:', err);
+    }
+    
+    ctx.restore();
+    
+    // Update sensor pulse
+    this.sensorPulsePhase += 0.05;
+  };
+
+  private drawBackground(width: number, height: number, radius: number): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    
+    // Radial gradient from sensor position for depth
+    const gradient = ctx.createRadialGradient(
+      width / 2, height - 40, 0,
+      width / 2, height - 40, radius * 1.2
+    );
+    gradient.addColorStop(0, '#0d1f2d');
+    gradient.addColorStop(0.4, '#0a1520');
+    gradient.addColorStop(1, '#060d15');
+
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, width, height);
+    
+    // Add subtle vignette
+    const vignette = ctx.createRadialGradient(
+      width / 2, height / 2, radius * 0.5,
+      width / 2, height / 2, radius * 1.5
+    );
+    vignette.addColorStop(0, 'transparent');
+    vignette.addColorStop(1, 'rgba(0, 0, 0, 0.4)');
+    ctx.fillStyle = vignette;
+    ctx.fillRect(0, 0, width, height);
+  }
+
+  private drawGrid3D(radius: number): void {
+    const ctx = this.ctx;
+    if (!ctx || radius < 10) return;
+
+    const startAngle = -this.FOV_ANGLE / 2 - Math.PI / 2;
+    const endAngle = this.FOV_ANGLE / 2 - Math.PI / 2;
+
+    // Draw depth-enhanced grid rings with 3D perspective
+    for (let i = 1; i <= 5; i++) {
+      const r = Math.max(1, (radius / 5) * i);
+      const depthFactor = i / 5;
+      const brightness = 0.1 + depthFactor * 0.25;
+      
+      // Inner shadow for depth (darker closer, lighter farther)
+      ctx.strokeStyle = `rgba(0, 255, 191, ${brightness})`;
+      ctx.lineWidth = 1 + depthFactor * 1.5;
+      ctx.shadowColor = `rgba(0, 255, 191, ${depthFactor * 0.4})`;
+      ctx.shadowBlur = 5 + depthFactor * 10;
+      
+      ctx.beginPath();
+      ctx.arc(0, 0, r, startAngle, endAngle);
+      ctx.stroke();
+      
+      // Add perspective lines at intervals
+      if (i % 2 === 0) {
+        ctx.strokeStyle = `rgba(0, 255, 191, ${brightness * 0.5})`;
+        ctx.lineWidth = 0.5;
+        ctx.shadowBlur = 0;
+        
+        const segments = 8;
+        for (let j = 0; j <= segments; j++) {
+          const angle = startAngle + (endAngle - startAngle) * (j / segments);
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.lineTo(r * Math.cos(angle), r * Math.sin(angle));
+          ctx.stroke();
+        }
+      }
+    }
+    ctx.shadowBlur = 0;
+
+    // FOV boundary lines with bright glow
+    ctx.strokeStyle = 'rgba(0, 255, 191, 0.6)';
+    ctx.lineWidth = 3;
+    ctx.shadowColor = 'rgba(0, 255, 191, 0.8)';
+    ctx.shadowBlur = 15;
+    
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(radius * Math.cos(startAngle), radius * Math.sin(startAngle));
+    ctx.stroke();
+    
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(radius * Math.cos(endAngle), radius * Math.sin(endAngle));
+    ctx.stroke();
+    
+    ctx.shadowBlur = 0;
+
+    // Center axis with gradient
+    const centerGradient = ctx.createLinearGradient(0, 0, 0, -radius);
+    centerGradient.addColorStop(0, 'rgba(0, 255, 191, 0.4)');
+    centerGradient.addColorStop(0.5, 'rgba(0, 255, 191, 0.25)');
+    centerGradient.addColorStop(1, 'rgba(0, 255, 191, 0.15)');
+    
+    ctx.strokeStyle = centerGradient;
+    ctx.lineWidth = 2;
+    ctx.shadowColor = 'rgba(0, 255, 191, 0.5)';
+    ctx.shadowBlur = 8;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(0, -radius);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+  }
+
+  private updateAndDrawWaves(radius: number): void {
+    const ctx = this.ctx;
+    if (!ctx || radius < 10) return;
+
+    const now = Date.now();
+    const startAngle = -this.FOV_ANGLE / 2 - Math.PI / 2;
+    const endAngle = this.FOV_ANGLE / 2 - Math.PI / 2;
+
+    // Update and draw each wave ring with 3D depth
+    this.waveRings = this.waveRings.filter(wave => {
+      const age = now - wave.timestamp;
+      const progress = age / 2000; // 2 second duration
+      
+      wave.radius = radius * progress;
+      wave.opacity = 1 - progress;
+
+      if (wave.opacity <= 0 || wave.radius > radius || wave.radius < 1) {
+        return false; // Remove completed waves
+      }
+
+      // Depth factor - waves get brighter as they expand (perspective)
+      const depthFactor = wave.radius / radius;
+      const brightness = wave.opacity * (0.4 + depthFactor * 0.3);
+      
+      // Outer glow layer (largest)
+      ctx.strokeStyle = `rgba(0, 255, 191, ${brightness * 0.3})`;
+      ctx.lineWidth = 4;
+      ctx.shadowColor = `rgba(0, 255, 191, ${brightness * 0.6})`;
+      ctx.shadowBlur = 20;
+      ctx.beginPath();
+      ctx.arc(0, 0, wave.radius, startAngle, endAngle);
+      ctx.stroke();
+      
+      // Main wave line (crisp)
+      ctx.strokeStyle = `rgba(0, 255, 191, ${brightness})`;
+      ctx.lineWidth = 2;
+      ctx.shadowColor = `rgba(0, 255, 191, ${brightness})`;
+      ctx.shadowBlur = 10;
+      ctx.beginPath();
+      ctx.arc(0, 0, wave.radius, startAngle, endAngle);
+      ctx.stroke();
+      
+      // Inner highlight (brightest) - only if radius is large enough
+      if (wave.radius > 2) {
+        ctx.strokeStyle = `rgba(255, 255, 255, ${brightness * 0.5})`;
+        ctx.lineWidth = 1;
+        ctx.shadowBlur = 5;
+        ctx.beginPath();
+        ctx.arc(0, 0, wave.radius - 1, startAngle, endAngle);
+        ctx.stroke();
+      }
+      
+      ctx.shadowBlur = 0;
+
+      return true;
+    });
+  }
+
+  private drawSensorCore(radius: number): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+
+    // Pulsing glow effect
+    const pulse = (Math.sin(this.sensorPulsePhase) + 1) / 2;
+    const coreSize = 8 + pulse * 4;
+    const glowSize = 20 + pulse * 10;
+
+    // Outer glow
+    const outerGlow = ctx.createRadialGradient(0, 0, 0, 0, 0, glowSize);
+    outerGlow.addColorStop(0, `rgba(0, 255, 191, ${0.3 + pulse * 0.2})`);
+    outerGlow.addColorStop(0.5, `rgba(0, 255, 191, ${0.1 + pulse * 0.1})`);
+    outerGlow.addColorStop(1, 'rgba(0, 255, 191, 0)');
+
+    ctx.fillStyle = outerGlow;
+    ctx.beginPath();
+    ctx.arc(0, 0, glowSize, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Core sensor
+    ctx.shadowColor = 'rgba(0, 255, 191, 0.8)';
+    ctx.shadowBlur = 15;
+    ctx.fillStyle = '#00ffbf';
+    ctx.beginPath();
+    ctx.arc(0, 0, coreSize, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+
+  private drawTargets3D(radius: number): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+
+    const scale = radius / this.maxRangeMm;
+
+    this.targetTrail.forEach(marker => {
+      const x = marker.x * scale;
+      const y = -marker.y * scale;
+      const alpha = Math.min(1, Math.max(0.2, marker.strength));
+      
+      // Distance for depth effect (further = smaller)
+      const distance = Math.sqrt(marker.x * marker.x + marker.y * marker.y);
+      const depthFactor = Math.max(0.5, 1 - (distance / this.maxRangeMm));
+      const size = 8 * depthFactor;
+
+      // Outer glow ring
+      const glowGradient = ctx.createRadialGradient(x, y, 0, x, y, size * 3);
+      glowGradient.addColorStop(0, `rgba(0, 255, 191, ${alpha * 0.4})`);
+      glowGradient.addColorStop(0.5, `rgba(0, 255, 191, ${alpha * 0.2})`);
+      glowGradient.addColorStop(1, 'rgba(0, 255, 191, 0)');
+      
+      ctx.fillStyle = glowGradient;
+      ctx.beginPath();
+      ctx.arc(x, y, size * 3, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Inner core with shadow
+      ctx.shadowColor = `rgba(0, 255, 191, ${alpha})`;
+      ctx.shadowBlur = 12;
+      ctx.fillStyle = `rgba(0, 255, 191, ${alpha})`;
+      ctx.beginPath();
+      ctx.arc(x, y, size, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Highlight dot for 3D effect
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = `rgba(255, 255, 255, ${alpha * 0.8})`;
+      ctx.beginPath();
+      ctx.arc(x - size * 0.3, y - size * 0.3, size * 0.3, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Target ID label
+      ctx.shadowBlur = 0;
+      ctx.font = `${10 * depthFactor}px Inter, sans-serif`;
+      ctx.fillStyle = `rgba(221, 255, 244, ${alpha})`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText(`ID ${marker.id}`, x, y - 8);
+    });
+  }
+
+  private decayTrail(): void {
+    for (let i = this.targetTrail.length - 1; i >= 0; i--) {
+      const marker = this.targetTrail[i];
+      marker.strength = Math.max(0, marker.strength - 0.01);
+      if (marker.strength <= 0.05) {
+        this.targetTrail.splice(i, 1);
+      }
+    }
+  }
+}
+

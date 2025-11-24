@@ -78,10 +78,21 @@ private:
     // Button/flash state
     bool buttonDown = false;
     bool longPressActive = false;
+    
+    // Helper to publish important logs to MQTT
+    void publishLog(const String& message, const String& level = "INFO", const String& tag = "");
     bool flashAllActive = false;
     bool flashOn = false;
     uint32_t lastFlashTick = 0;
     uint32_t buttonPressedAt = 0;
+    
+    // Manual LED control
+    bool manualLedMode = false;
+    uint8_t manualR = 0;
+    uint8_t manualG = 0;
+    uint8_t manualB = 0;
+    uint32_t manualLedTimeoutMs = 0;
+
     void startFlashAll();
     void stopFlashAll();
     void flashAllTick(uint32_t now);
@@ -97,7 +108,6 @@ private:
     void updateNodeTelemetryCache(const String& nodeId, const NodeStatusMessage& statusMsg);
     void refreshCoordinatorSensors();
     void printSerialTelemetry();
-    float readInternalTemperatureC() const;
     void recordBootStatus(const char* name, bool ok, const String& detail);
     void printBootSummary();
 };

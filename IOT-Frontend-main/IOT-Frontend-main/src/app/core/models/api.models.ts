@@ -35,11 +35,14 @@ export interface Coordinator {
   site_id: string;
   mac_address: string;
   wifi_ssid?: string;
+  wifi_rssi?: number;
   mqtt_broker?: string;
   firmware_version?: string;
   status: 'online' | 'offline' | 'error';
   uptime?: number;
   heap_free?: number;
+  light_lux?: number;
+  temp_c?: number;
   last_seen: Date;
   created_at: Date;
   updated_at: Date;
@@ -52,6 +55,8 @@ export interface CoordinatorTelemetry {
   heap_free: number;
   wifi_rssi: number;
   mqtt_connected: boolean;
+  light_lux?: number;
+  temp_c?: number;
   timestamp: Date;
 }
 
@@ -62,6 +67,7 @@ export interface CoordinatorTelemetry {
 export interface Node {
   _id: string;
   node_id: string;
+  name?: string;
   site_id: string;
   zone_id?: string;
   mac_address: string;
@@ -193,7 +199,10 @@ export interface MmwaveFrame {
 export interface HealthStatus {
   status: 'healthy' | 'degraded' | 'unhealthy';
   service: string;
-  timestamp?: Date;
+  database?: boolean;
+  mqtt?: boolean;
+  coordinator?: boolean;
+  timestamp?: number;
   checks?: {
     mongodb?: boolean;
     mqtt?: boolean;

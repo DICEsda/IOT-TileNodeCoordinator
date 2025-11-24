@@ -16,7 +16,7 @@ const (
 )
 
 type Node struct {
-	Id            string     `bson:"_id,omitempty" json:"id"`
+	Id            string     `bson:"_id,omitempty" json:"_id"`
 	LightId       string     `bson:"light_id" json:"light_id"`
 	StatusMode    StatusMode `bson:"status_mode" json:"status_mode"`
 	AvgR          int        `bson:"avg_r" json:"avg_r"`
@@ -29,20 +29,25 @@ type Node struct {
 }
 
 type Coordinator struct {
-	Id              string    `bson:"_id,omitempty" json:"id"`
+	Id              string    `bson:"_id,omitempty" json:"_id"`
+	CoordId         string    `bson:"coord_id" json:"coord_id"`
 	SiteId          string    `bson:"site_id" json:"site_id"`
 	FwVersion       string    `bson:"fw_version" json:"fw_version"`
 	NodesOnline     int       `bson:"nodes_online" json:"nodes_online"`
 	WifiRssi        int       `bson:"wifi_rssi" json:"wifi_rssi"`
 	MmwaveEventRate float32   `bson:"mmwave_event_rate" json:"mmwave_event_rate"`
+	LightLux        float32   `bson:"light_lux" json:"light_lux"`
+	TempC           float32   `bson:"temp_c" json:"temp_c"`
 	LastSeen        time.Time `bson:"last_seen" json:"last_seen"`
 }
 
 type Site struct {
-	Id       string `bson:"_id,omitempty" json:"id"`
-	Name     string `bson:"name" json:"name"`
-	Location string `bson:"location" json:"location"`
-	Config   string `bson:"config" json:"config"`
+	Id        string    `bson:"_id,omitempty" json:"_id"`
+	Name      string    `bson:"name" json:"name"`
+	Location  string    `bson:"location" json:"location"`
+	Config    string    `bson:"config" json:"config"`
+	CreatedAt time.Time `bson:"created_at" json:"created_at"`
+	UpdatedAt time.Time `bson:"updated_at" json:"updated_at"`
 }
 
 type Telemetry struct {
@@ -63,7 +68,7 @@ type MmwaveTarget struct {
 }
 
 type MmwaveFrame struct {
-	ID            primitive.ObjectID `bson:"_id,omitempty" json:"id"`
+	ID            primitive.ObjectID `bson:"_id,omitempty" json:"_id"`
 	SiteId        string             `bson:"site_id" json:"site_id"`
 	CoordinatorId string             `bson:"coordinator_id" json:"coordinator_id"`
 	SensorId      string             `bson:"sensor_id" json:"sensor_id"`
@@ -91,7 +96,7 @@ const (
 )
 
 type OTAJob struct {
-	Id            string     `bson:"_id,omitempty" json:"id"`
+	Id            string     `bson:"_id,omitempty" json:"_id"`
 	TargetType    TargetType `bson:"target_type" json:"target_type"`
 	TargetVersion string     `bson:"target_version" json:"target_version"`
 	Status        Status     `bson:"status" json:"status"`

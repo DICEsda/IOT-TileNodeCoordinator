@@ -4,3 +4,4 @@
  */
 
 export * from './api.models';
+export * from './settings.models';

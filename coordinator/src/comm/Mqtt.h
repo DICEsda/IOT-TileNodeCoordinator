@@ -26,6 +26,7 @@ public:
     void publishMmWaveEvent(const MmWaveEvent& event);
     void publishNodeStatus(const NodeStatusMessage& status);
     void publishCoordinatorTelemetry(const CoordinatorSensorSnapshot& snapshot);
+    void publishSerialLog(const String& message, const String& level = "INFO", const String& tag = "");
     
     // Configuration
     void setBrokerConfig(const char* host, uint16_t port, const char* username, const char* password);
@@ -78,5 +79,6 @@ private:
     String nodeTelemetryTopic(const String& nodeId) const;
     String coordinatorTelemetryTopic() const;
     String coordinatorCmdTopic() const;
+    String coordinatorSerialTopic() const;
     String coordinatorMmwaveTopic() const;
 };

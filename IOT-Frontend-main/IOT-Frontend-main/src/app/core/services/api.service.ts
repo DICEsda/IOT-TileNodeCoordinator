@@ -177,13 +177,202 @@ export class ApiService {
   }
 
   // ============================================================================
+  // Settings API
+  // ============================================================================
+
+  /**
+   * Get settings for a site
+   */
+  getSettings(siteId: string): Observable<any> {
+    return this.get<any>(`/api/v1/settings?site_id=${siteId}`);
+  }
+
+  /**
+   * Save settings for a site
+   */
+  saveSettings(siteId: string, settings: any): Observable<any> {
+    return this.put<any>(`/api/v1/settings`, settings);
+  }
+
+  // ============================================================================
+  // Coordinator Control API
+  // ============================================================================
+
+  /**
+   * Get coordinator details
+   */
+  getCoordinator(siteId: string, coordinatorId: string): Observable<any> {
+    return this.get<any>(`/sites/${siteId}/coordinators/${coordinatorId}`);
+  }
+
+  /**
+   * Start pairing mode
+   */
+  startPairing(siteId: string, coordinatorId: string, durationSeconds: number): Observable<any> {
+    return this.post<any>(`/api/v1/coordinator/pair`, {
+      site_id: siteId,
+      coordinator_id: coordinatorId,
+      duration_ms: durationSeconds * 1000
+    });
+  }
+
+  /**
+   * Restart coordinator
+   */
+  restartCoordinator(siteId: string, coordinatorId: string): Observable<any> {
+    return this.post<any>(`/api/v1/coordinator/restart`, {
+      site_id: siteId,
+      coordinator_id: coordinatorId
+    });
+  }
+
+  /**
+   * Update WiFi configuration
+   */
+  updateWiFiConfig(siteId: string, coordinatorId: string, ssid: string, password: string): Observable<any> {
+    return this.post<any>(`/api/v1/coordinator/wifi`, {
+      site_id: siteId,
+      coordinator_id: coordinatorId,
+      ssid,
+      password
+    });
+  }
+
+  // ============================================================================
+  // Node Management API
+  // ============================================================================
+
+  /**
+   * Get all nodes for a coordinator
+   */
+  getNodes(siteId: string, coordinatorId: string): Observable<any[]> {
+    return this.get<any[]>(`/sites/${siteId}/coordinators/${coordinatorId}/nodes`);
+  }
+
+  /**
+   * Delete a node
+   */
+  deleteNode(siteId: string, coordinatorId: string, nodeId: string): Observable<any> {
+    return this.delete<any>(`/sites/${siteId}/coordinators/${coordinatorId}/nodes/${nodeId}`);
+  }
+
+  /**
+   * Update node zone
+   */
+  updateNodeZone(siteId: string, coordinatorId: string, nodeId: string, zoneId: string): Observable<any> {
+    return this.put<any>(`/api/v1/node/zone`, {
+      site_id: siteId,
+      coordinator_id: coordinatorId,
+      node_id: nodeId,
+      zone_id: zoneId
+    });
+  }
+
+  /**
+   * Update node name
+   */
+  updateNodeName(siteId: string, coordinatorId: string, nodeId: string, name: string): Observable<any> {
+    return this.put<any>(`/api/v1/node/name`, {
+      site_id: siteId,
+      coordinator_id: coordinatorId,
+      node_id: nodeId,
+      name
+    });
+  }
+
+  /**
+   * Send test color to node
+   */
+  sendNodeColor(siteId: string, coordinatorId: string, nodeId: string, r: number, g: number, b: number, w: number): Observable<any> {
+    return this.post<any>(`/api/v1/node/test-color`, {
+      site_id: siteId,
+      coordinator_id: coordinatorId,
+      node_id: nodeId,
+      r, g, b, w
+    });
+  }
+
+  /**
+   * Turn off node LEDs
+   */
+  turnOffNode(siteId: string, coordinatorId: string, nodeId: string): Observable<any> {
+    return this.post<any>(`/api/v1/node/off`, {
+      site_id: siteId,
+      coordinator_id: coordinatorId,
+      node_id: nodeId
+    });
+  }
+
+  /**
+   * Set node brightness
+   */
+  setNodeBrightness(siteId: string, coordinatorId: string, nodeId: string, brightness: number): Observable<any> {
+    return this.post<any>(`/api/v1/node/brightness`, {
+      site_id: siteId,
+      coordinator_id: coordinatorId,
+      node_id: nodeId,
+      brightness
+    });
+  }
+
+  // ============================================================================
+  // Google Home Integration API
+  // ============================================================================
+
+  /**
+   * Disconnect Google Home
+   */
+  disconnectGoogleHome(siteId: string): Observable<any> {
+    return this.post<any>(`/api/v1/google/disconnect`, {
+      site_id: siteId
+    });
+  }
+
+  // ============================================================================
+  // System Settings API
+  // ============================================================================
+
+  /**
+   * Get all system settings
+   */
+  getSystemSettings(): Observable<any> {
+    return this.get<any>('/api/v1/system/settings');
+  }
+
+  /**
+   * Update a specific section of system settings
+   */
+  updateSystemSettings(section: string, settings: any): Observable<any> {
+    return this.put<any>('/api/v1/system/settings', {
+      section,
+      settings
+    });
+  }
+
+  /**
+   * Validate settings password
+   */
+  validateSettingsPassword(password: string): Observable<{ valid: boolean }> {
+    return this.post<{ valid: boolean }>('/api/v1/system/settings/validate-password', {
+      password
+    });
+  }
+
+  /**
+   * Reset settings to defaults
+   */
+  resetSettingsToDefaults(): Observable<any> {
+    return this.post<any>('/api/v1/system/settings/reset', {});
+  }
+
+  // ============================================================================
   // Generic HTTP Methods
   // ============================================================================
 
   /**
    * Generic GET request
    */
-  private get<T>(endpoint: string): Observable<T> {
+  get<T>(endpoint: string): Observable<T> {
     return new Observable<T>(observer => {
       fetch(`${this.baseUrl}${endpoint}`, {
         method: 'GET',
@@ -212,7 +401,7 @@ export class ApiService {
   /**
    * Generic POST request
    */
-  private post<T>(endpoint: string, body: any): Observable<T> {
+  post<T>(endpoint: string, body: any): Observable<T> {
     return new Observable<T>(observer => {
       fetch(`${this.baseUrl}${endpoint}`, {
         method: 'POST',
@@ -242,7 +431,7 @@ export class ApiService {
   /**
    * Generic PUT request
    */
-  private put<T>(endpoint: string, body: any): Observable<T> {
+  put<T>(endpoint: string, body: any): Observable<T> {
     return new Observable<T>(observer => {
       fetch(`${this.baseUrl}${endpoint}`, {
         method: 'PUT',

@@ -1,5 +1,6 @@
 import { CommonModule } from '@angular/common';
 import { Component, Input, OnChanges, signal, SimpleChanges } from '@angular/core';
+import { Node } from '../../../../core/models/api.models';
 
 interface Bulb {
   id: number;
@@ -7,7 +8,7 @@ interface Bulb {
 }
 
 interface LightNode {
-  id: number;
+  id: string; // Changed to string to match Node.node_id
   name: string;
   bulbs: Bulb[];
   totalOn: number;
@@ -15,7 +16,7 @@ interface LightNode {
 }
 
 interface LightNodeState {
-  nodeId: number;
+  nodeId: string; // Changed to string
   totalBulbs: number;
   activeBulbs: number;
 }
@@ -29,62 +30,10 @@ interface LightNodeState {
 export class LightMonitorComponent implements OnChanges {
   @Input() totalActiveLights: number = 0;
   @Input() lightNodeStates: LightNodeState[] = [];
+  @Input() registeredNodes: Node[] = []; // New input for real nodes
 
-  private nodeNames = [
-    'Node 01 - Front Left',
-    'Node 02 - Front Center',
-    'Node 03 - Front Right',
-    'Node 04 - Back Left',
-    'Node 05 - Back Center',
-    'Node 06 - Back Right'
-  ];
-
-  nodes = signal<LightNode[]>([
-    {
-      id: 1,
-      name: 'Node 01 - Front Left',
-      bulbs: Array.from({ length: 6 }, (_, i) => ({ id: i + 1, isOn: false })),
-      totalOn: 0,
-      status: 'active'
-    },
-    {
-      id: 2,
-      name: 'Node 02 - Front Center',
-      bulbs: Array.from({ length: 6 }, (_, i) => ({ id: i + 1, isOn: false })),
-      totalOn: 0,
-      status: 'active'
-    },
-    {
-      id: 3,
-      name: 'Node 03 - Front Right',
-      bulbs: Array.from({ length: 6 }, (_, i) => ({ id: i + 1, isOn: false })),
-      totalOn: 0,
-      status: 'active'
-    },
-    {
-      id: 4,
-      name: 'Node 04 - Back Left',
-      bulbs: Array.from({ length: 6 }, (_, i) => ({ id: i + 1, isOn: false })),
-      totalOn: 0,
-      status: 'active'
-    },
-    {
-      id: 5,
-      name: 'Node 05 - Back Center',
-      bulbs: Array.from({ length: 6 }, (_, i) => ({ id: i + 1, isOn: false })),
-      totalOn: 0,
-      status: 'active'
-    },
-    {
-      id: 6,
-      name: 'Node 06 - Back Right',
-      bulbs: Array.from({ length: 6 }, (_, i) => ({ id: i + 1, isOn: false })),
-      totalOn: 0,
-      status: 'active'
-    }
-  ]);
-
-  totalLights = signal(36);
+  nodes = signal<LightNode[]>([]);
+  totalLights = signal(0);
   activeLights = signal(0);
 
   get activeNodesCount(): number {
@@ -92,16 +41,51 @@ export class LightMonitorComponent implements OnChanges {
   }
 
   ngOnChanges(changes: SimpleChanges): void {
+    if (changes['registeredNodes']) {
+      this.initializeNodes();
+    }
+    
     if (changes['lightNodeStates'] || changes['totalActiveLights']) {
       this.updateFromLightNodeStates();
     }
   }
 
+  private initializeNodes(): void {
+    let initialNodes: LightNode[] = [];
+
+    if (this.registeredNodes && this.registeredNodes.length > 0) {
+      // Use registered nodes
+      initialNodes = this.registeredNodes.map(node => ({
+        id: node.node_id,
+        name: node.name || `Node ${node.node_id.substring(0, 4)}`,
+        bulbs: Array.from({ length: 6 }, (_, i) => ({ id: i + 1, isOn: false })),
+        totalOn: 0,
+        status: node.status === 'online' ? 'idle' : 'offline'
+      }));
+    } else {
+      // Fallback to single node for development if no nodes registered
+      initialNodes = [{
+        id: 'node-default',
+        name: 'Single Node (Dev)',
+        bulbs: Array.from({ length: 6 }, (_, i) => ({ id: i + 1, isOn: false })),
+        totalOn: 0,
+        status: 'idle'
+      }];
+    }
+
+    this.nodes.set(initialNodes);
+    this.totalLights.set(initialNodes.length * 6);
+  }
+
   private updateFromLightNodeStates(): void {
-    if (this.lightNodeStates.length === 0) return;
+    if (this.nodes().length === 0) {
+        this.initializeNodes();
+    }
 
     const updatedNodes = this.nodes().map(node => {
       const nodeState = this.lightNodeStates.find(s => s.nodeId === node.id);
+      
+      // If no state update, keep current state but ensure status reflects connectivity
       if (!nodeState) return node;
 
       // Simulate bulb states based on active count
@@ -122,7 +106,7 @@ export class LightMonitorComponent implements OnChanges {
     this.activeLights.set(this.totalActiveLights);
   }
 
-  toggleNode(nodeId: number) {
+  toggleNode(nodeId: string) {
     const updatedNodes = this.nodes().map(node => {
       if (node.id === nodeId) {
         const allOn = node.bulbs.every(b => b.isOn);
@@ -144,7 +128,7 @@ export class LightMonitorComponent implements OnChanges {
     this.nodes.set(updatedNodes);
   }
 
-  toggleBulb(nodeId: number, bulbId: number) {
+  toggleBulb(nodeId: string, bulbId: number) {
     const updatedNodes = this.nodes().map(node => {
       if (node.id === nodeId) {
         const updatedBulbs = node.bulbs.map(bulb => {

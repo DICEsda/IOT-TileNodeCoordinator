@@ -237,6 +237,14 @@ export class MqttService {
   }
 
   /**
+   * Send command to a coordinator
+   */
+  sendCoordinatorCommand(siteId: string, coordId: string, command: any): void {
+    const topic = `site/${siteId}/coord/${coordId}/cmd`;
+    this.publish(topic, command, 1);
+  }
+
+  /**
    * Setup WebSocket event handlers
    */
   private setupEventHandlers(): void {

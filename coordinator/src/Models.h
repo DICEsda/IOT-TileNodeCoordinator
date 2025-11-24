@@ -54,7 +54,7 @@ struct SensorData {
 
 struct CoordinatorSensorSnapshot {
     float lightLux = 0.0f;
-    float temperatureC = 0.0f;
+    float tempC = 0.0f;
     bool mmWavePresence = false;
     float mmWaveConfidence = 0.0f;
     bool mmWaveOnline = false;

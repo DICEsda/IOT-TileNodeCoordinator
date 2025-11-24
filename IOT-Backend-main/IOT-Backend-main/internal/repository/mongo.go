@@ -88,6 +88,23 @@ func (r *MongoRepository) GetSiteById(id string) (*types.Site, error) {
 	coll := r.db.Collection("sites")
 	site := &types.Site{}
 	if err := coll.FindOne(ctx, bson.M{"_id": id}).Decode(site); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			// Auto-create site001 if requested and missing (Development convenience)
+			if id == "site001" {
+				r.logger.Info("Auto-creating default site001")
+				defaultSite := &types.Site{
+					Id:        "site001",
+					Name:      "Default Site",
+					Location:  "Local",
+					CreatedAt: time.Now(),
+					UpdatedAt: time.Now(),
+				}
+				if err := r.CreateSite(ctx, defaultSite); err == nil {
+					return defaultSite, nil
+				}
+			}
+			return nil, fmt.Errorf("site with id %s not found: %w", id, err)
+		}
 		return nil, err
 	}
 	return site, nil
@@ -148,6 +165,17 @@ func (r *MongoRepository) CreateSite(ctx context.Context, site *types.Site) erro
 	return nil
 }
 
+func (r *MongoRepository) UpsertSite(ctx context.Context, site *types.Site) error {
+	coll := r.db.Collection("sites")
+	update := bson.M{"$set": site}
+	opts := options.Update().SetUpsert(true)
+	if _, err := coll.UpdateOne(ctx, bson.M{"_id": site.Id}, update, opts); err != nil {
+		r.logger.Error("Failed to upsert site", zap.Error(err))
+		return err
+	}
+	return nil
+}
+
 func (r *MongoRepository) InsertMmwaveFrame(ctx context.Context, frame *types.MmwaveFrame) error {
 	coll := r.db.Collection("mmwave_frames")
 	if frame.Timestamp.IsZero() {
@@ -184,4 +212,119 @@ func (r *MongoRepository) GetMmwaveFrames(ctx context.Context, siteId string, co
 		return nil, err
 	}
 	return frames, nil
+}
+
+// GetCoordinatorBySiteAndId retrieves a coordinator by site and coordinator ID
+func (r *MongoRepository) GetCoordinatorBySiteAndId(siteId string, coordId string) (*types.Coordinator, error) {
+	ctx := context.Background()
+	coll := r.db.Collection("coordinators")
+	coordinator := &types.Coordinator{}
+	filter := bson.M{
+		"site_id": siteId,
+		"_id":     coordId,
+	}
+	if err := coll.FindOne(ctx, filter).Decode(coordinator); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, fmt.Errorf("coordinator not found: %w", err)
+		}
+		return nil, err
+	}
+	return coordinator, nil
+}
+
+// GetNodesByCoordinator retrieves all nodes for a coordinator
+func (r *MongoRepository) GetNodesByCoordinator(siteId string, coordId string) ([]*types.Node, error) {
+	ctx := context.Background()
+	coll := r.db.Collection("nodes")
+	filter := bson.M{
+		"site_id":        siteId,
+		"coordinator_id": coordId,
+	}
+	cursor, err := coll.Find(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	var nodes []*types.Node
+	if err := cursor.All(ctx, &nodes); err != nil {
+		return nil, err
+	}
+	return nodes, nil
+}
+
+// DeleteNode removes a node from the database
+func (r *MongoRepository) DeleteNode(siteId string, coordId string, nodeId string) error {
+	ctx := context.Background()
+	coll := r.db.Collection("nodes")
+	filter := bson.M{
+		"site_id":        siteId,
+		"coordinator_id": coordId,
+		"node_id":        nodeId,
+	}
+	_, err := coll.DeleteOne(ctx, filter)
+	return err
+}
+
+// UpdateNodeZone updates the zone assignment for a node
+func (r *MongoRepository) UpdateNodeZone(siteId string, coordId string, nodeId string, zoneId string) error {
+	ctx := context.Background()
+	coll := r.db.Collection("nodes")
+	filter := bson.M{
+		"site_id":        siteId,
+		"coordinator_id": coordId,
+		"node_id":        nodeId,
+	}
+	update := bson.M{
+		"$set": bson.M{
+			"zone_id":    zoneId,
+			"updated_at": time.Now(),
+		},
+	}
+	_, err := coll.UpdateOne(ctx, filter, update)
+	return err
+}
+
+// UpdateNodeName updates the name for a node
+func (r *MongoRepository) UpdateNodeName(siteId string, coordId string, nodeId string, name string) error {
+	ctx := context.Background()
+	coll := r.db.Collection("nodes")
+	filter := bson.M{
+		"site_id":        siteId,
+		"coordinator_id": coordId,
+		"node_id":        nodeId,
+	}
+	update := bson.M{
+		"$set": bson.M{
+			"name":       name,
+			"updated_at": time.Now(),
+		},
+	}
+	_, err := coll.UpdateOne(ctx, filter, update)
+	return err
+}
+
+// GetSettings retrieves settings for a site
+func (r *MongoRepository) GetSettings(siteId string) (*Settings, error) {
+	ctx := context.Background()
+	coll := r.db.Collection("settings")
+	settings := &Settings{}
+	if err := coll.FindOne(ctx, bson.M{"site_id": siteId}).Decode(settings); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, fmt.Errorf("settings not found: %w", err)
+		}
+		return nil, err
+	}
+	return settings, nil
+}
+
+// SaveSettings saves or updates settings for a site
+func (r *MongoRepository) SaveSettings(settings *Settings) error {
+	ctx := context.Background()
+	coll := r.db.Collection("settings")
+	filter := bson.M{"site_id": settings.SiteID}
+	update := bson.M{"$set": settings}
+	opts := options.Update().SetUpsert(true)
+	_, err := coll.UpdateOne(ctx, filter, update, opts)
+	return err
 }

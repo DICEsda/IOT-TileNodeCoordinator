@@ -1,17 +1,21 @@
 #pragma once
 
 #include <Arduino.h>
+#include <Wire.h>
+#include <Adafruit_TSL2561_U.h>
 #include "../config/PinConfig.h"
 
 class AmbientLightSensor {
 public:
     AmbientLightSensor();
 
-    bool begin(uint8_t analogPin = Pins::External::AMBIENT_LIGHT_ADC);
+    ~AmbientLightSensor();
+
+    bool begin();
     float readLux();
-    uint16_t readRaw();
+    bool isConnected();
 
 private:
-    uint8_t pin;
+    Adafruit_TSL2561_Unified* tsl;
     bool initialized;
 };

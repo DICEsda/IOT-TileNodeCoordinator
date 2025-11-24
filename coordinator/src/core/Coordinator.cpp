@@ -18,7 +18,12 @@ Coordinator::Coordinator()
     , buttons(nullptr)
     , thermal(nullptr)
     , wifi(nullptr)
-    , ambientLight(nullptr) {}
+    , ambientLight(nullptr)
+    , manualLedMode(false)
+    , manualR(0)
+    , manualG(0)
+    , manualB(0)
+    , manualLedTimeoutMs(0) {}
 
 
 Coordinator::~Coordinator() {
@@ -41,6 +46,7 @@ bool Coordinator::begin() {
     bootStatus.clear();
     
     Logger::info("Smart Tile Coordinator starting...");
+    publishLog("Smart Tile Coordinator starting...", "INFO", "setup");
 
     espNow = new EspNow();
     mqtt = new Mqtt();
@@ -81,6 +87,7 @@ bool Coordinator::begin() {
         return false;
     }
     Logger::info("ESP-NOW initialized successfully");
+    publishLog("ESP-NOW initialized successfully", "INFO", "setup");
 
     // Register message callback for regular node messages
     espNow->setMessageCallback([this](const String& nodeId, const uint8_t* data, size_t len) {
@@ -180,10 +187,12 @@ bool Coordinator::begin() {
 
     Logger::info("Initializing mmWave sensor...");
     bool mmWaveOk = mmWave->begin();
-    recordBootStatus("mmWave", mmWaveOk, mmWaveOk ? "LD2450 streaming" : "will retry");
+    bool mmWaveOnline = mmWave->isOnline();
+    recordBootStatus("mmWave", mmWaveOnline, mmWaveOnline ? "LD2450 streaming" : "will retry");
     if (!mmWaveOk) {
         Logger::warn("Failed to initialize mmWave sensor - continuing without it");
-        // Non-critical, continue without mmWave
+    } else if (!mmWaveOnline) {
+        Logger::warn("mmWave sensor initialized but no stream detected - will retry in background");
     } else {
         Logger::info("mmWave initialized successfully");
     }
@@ -196,6 +205,7 @@ bool Coordinator::begin() {
         return false;
     }
     Logger::info("Node registry initialized successfully");
+    publishLog("Node registry initialized successfully", "INFO", "setup");
     nodes->setNodeRegisteredCallback([this](const String& nodeId, const String& lightId) {
         Logger::info("Node %s paired to light %s", nodeId.c_str(), lightId.c_str());
         if (espNow) {
@@ -253,10 +263,10 @@ bool Coordinator::begin() {
 
     bool ambientOk = true;
     if (ambientLight && !ambientLight->begin()) {
-        Logger::warn("Ambient light sensor init failed (continuing)");
+        Logger::warn("TSL2561 ambient light sensor init failed (continuing)");
         ambientOk = false;
     }
-    recordBootStatus("Ambient", ambientOk, ambientOk ? "ADC ready" : "sensor offline");
+    recordBootStatus("Ambient", ambientOk, ambientOk ? "TSL2561 ready" : "sensor offline");
 
     // Register event handlers
     mmWave->setEventCallback([this](const MmWaveEvent& event) {
@@ -298,7 +308,7 @@ bool Coordinator::begin() {
 printBootSummary();
 Logger::info("Coordinator initialization complete");
 Logger::info("==============================================");
-Logger::info("System ready! Touch sensor to pair nodes.");
+Logger::info("System ready! Press BOOT button to pair nodes.");
 Logger::info("Hold 4s to run wave test on paired nodes.");
 logConnectedNodes();
 Logger::info("==============================================");
@@ -570,10 +580,23 @@ void Coordinator::flashLedForNode(const String& nodeId, uint32_t durationMs) {
 
 void Coordinator::updateLeds() {
     uint32_t now = millis();
+    
+    // Check for manual LED override timeout
+    if (manualLedMode && manualLedTimeoutMs > 0 && now > manualLedTimeoutMs) {
+        manualLedMode = false;
+        Logger::info("Manual LED override timed out");
+    }
+
     int groupCount = Pins::RgbLed::NUM_PIXELS / 4;
     for (int g = 0; g < groupCount; ++g) {
         uint8_t r=0,gc=0,b=0;
-        if (groupFlashUntilMs[g] > now) {
+        
+        if (manualLedMode) {
+            // Manual override active
+            r = manualR;
+            gc = manualG;
+            b = manualB;
+        } else if (groupFlashUntilMs[g] > now) {
             // Bright green flash (activity) at 50%
             r=0; gc=128; b=0;
         } else if (groupToNode[g].length() > 0) {
@@ -758,6 +781,24 @@ void Coordinator::handleMqttCommand(const String& topic, const String& payload) 
         if (espNow) espNow->disablePairingMode();
         Logger::info("Pairing window closed via MQTT command");
         Serial.println("Pairing window closed via MQTT command");
+    } else if (cmd == "led.set") {
+        manualR = doc["r"] | 0;
+        manualG = doc["g"] | 0;
+        manualB = doc["b"] | 0;
+        uint32_t duration = doc["duration_ms"] | 0;
+        
+        manualLedMode = true;
+        if (duration > 0) {
+            manualLedTimeoutMs = millis() + duration;
+        } else {
+            manualLedTimeoutMs = 0; // Indefinite
+        }
+        Logger::info("Manual LED override: RGB(%d,%d,%d)", manualR, manualG, manualB);
+        updateLeds();
+    } else if (cmd == "led.reset") {
+        manualLedMode = false;
+        Logger::info("Manual LED override cleared");
+        updateLeds();
     }
 }
 
@@ -770,6 +811,8 @@ void Coordinator::startPairingWindow(uint32_t durationMs, const char* reason) {
     const char* origin = reason ? reason : "manual";
     Logger::info("Pairing window (%s) open for %u ms", origin, durationMs);
     Serial.printf("PAIRING MODE (%s) OPEN for %lu ms\n", origin, (unsigned long)durationMs);
+    String msg = "Pairing window (" + String(origin) + ") open for " + String(durationMs) + " ms";
+    publishLog(msg, "INFO", "pairing");
     statusLed.pulse(0, 0, 180, 500);
 }
 
@@ -799,7 +842,14 @@ void Coordinator::refreshCoordinatorSensors() {
     if (ambientLight) {
         coordinatorSensors.lightLux = ambientLight->readLux();
     }
-    coordinatorSensors.temperatureC = readInternalTemperatureC();
+    
+    // Read ESP32 internal temperature sensor (if available)
+    #ifdef SOC_TEMP_SENSOR_SUPPORTED
+    coordinatorSensors.tempC = temperatureRead();
+    #else
+    coordinatorSensors.tempC = 0.0f;
+    #endif
+    
     coordinatorSensors.timestampMs = now;
     bool mmWaveOnline = mmWave && mmWave->isOnline();
     coordinatorSensors.mmWaveOnline = mmWaveOnline;
@@ -863,9 +913,8 @@ void Coordinator::printSerialTelemetry() {
 
     Serial.println();
     Serial.println("========== Coordinator Snapshot ==========");
-    Serial.printf("Sensors   | Lux %5.1f  Temp %4.1f C\n",
-                  coordinatorSensors.lightLux,
-                  coordinatorSensors.temperatureC);
+    Serial.printf("Sensors   | Lux %5.1f\n",
+                  coordinatorSensors.lightLux);
     Serial.printf("mmWave    | %-8s  conf=%.2f restarts=%u\n",
                   mmStatus,
                   coordinatorSensors.mmWaveConfidence,
@@ -915,6 +964,12 @@ void Coordinator::recordBootStatus(const char* name, bool ok, const String& deta
     bootStatus.push_back(entry);
 }
 
+void Coordinator::publishLog(const String& message, const String& level, const String& tag) {
+    if (mqtt && mqtt->isConnected()) {
+        mqtt->publishSerialLog(message, level, tag);
+    }
+}
+
 void Coordinator::printBootSummary() {
     if (bootStatus.empty()) {
         return;
@@ -938,11 +993,3 @@ void Coordinator::printBootSummary() {
     Serial.println();
 }
 
-float Coordinator::readInternalTemperatureC() const {
-#if defined(ARDUINO_ARCH_ESP32)
-    float f = temperatureRead();
-    return (f - 32.0f) / 1.8f;
-#else
-    return 0.0f;
-#endif
-}

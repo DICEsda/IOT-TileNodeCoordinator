@@ -43,6 +43,9 @@ export class DataService implements OnDestroy {
   public readonly apiHealthy = signal<boolean>(false);
   public readonly wsConnected = signal<boolean>(false);
   public readonly mqttConnected = signal<boolean>(false);
+  public readonly dbHealthy = signal<boolean>(false);
+  public readonly mqttBrokerHealthy = signal<boolean>(false);
+  public readonly coordOnline = signal<boolean>(false);
 
   constructor() {
     this.initialize();
@@ -130,12 +133,32 @@ export class DataService implements OnDestroy {
    */
   async loadSite(siteId: string): Promise<Site> {
     try {
-      const site = await new Promise<Site>((resolve, reject) => {
-        this.api.getSiteById(siteId).subscribe({
-          next: (data) => resolve(data),
-          error: (err) => reject(err)
+      let site: Site;
+      try {
+        site = await new Promise<Site>((resolve, reject) => {
+          this.api.getSiteById(siteId).subscribe({
+            next: (data) => resolve(data),
+            error: (err) => reject(err)
+          });
         });
-      });
+      } catch (err: any) {
+        // If site not found (404), create a placeholder
+        const errorMsg = err.message || err.toString();
+        if (errorMsg.includes('404') || errorMsg.includes('Not Found')) {
+          console.warn(`[DataService] Site ${siteId} not found, creating placeholder`);
+          site = {
+            _id: siteId,
+            name: siteId,
+            location: 'Unknown',
+            coordinators: [],
+            zones: [],
+            created_at: new Date(),
+            updated_at: new Date()
+          };
+        } else {
+          throw err;
+        }
+      }
       
       // Update sites array
       const currentSites = this.sites();
@@ -160,16 +183,45 @@ export class DataService implements OnDestroy {
     }
   }
 
+  private subscribedSites = new Set<string>();
+
   /**
    * Subscribe to telemetry for all nodes in a site
    */
   private subscribeSiteTelemetry(siteId: string): void {
+    if (this.subscribedSites.has(siteId)) {
+      return;
+    }
+    this.subscribedSites.add(siteId);
+
     // Subscribe to all node telemetry
     this.mqtt.subscribeAllNodesTelemetry(siteId)
       .pipe(takeUntil(this.destroy$))
       .subscribe(telemetry => {
+        if (this.env.isDevelopment) {
+          console.log('[DataService] Node telemetry:', telemetry);
+        }
         this.handleTelemetry(telemetry);
       });
+
+    // Subscribe to coordinator telemetry
+    // We use messages$ stream to get the topic, as the payload might not contain the ID
+    this.mqtt.messages$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(msg => {
+        console.log('[DataService] MQTT message received:', msg.topic, msg.payload);
+        // Check if it matches coordinator telemetry pattern: site/{siteId}/coord/{coordId}/telemetry
+        const parts = msg.topic.split('/');
+        if (parts.length === 5 && parts[0] === 'site' && parts[1] === siteId && parts[2] === 'coord' && parts[4] === 'telemetry') {
+          const coordId = parts[3];
+          const telemetry = { ...msg.payload, coord_id: coordId };
+          console.log('[DataService] Coordinator telemetry received:', telemetry);
+          this.handleTelemetry(telemetry);
+        }
+      });
+    
+    // Ensure subscription is active
+    this.mqtt.subscribeCoordinatorTelemetry(siteId, '+');
 
     // Subscribe to pairing requests
     this.mqtt.subscribePairingRequests(siteId)
@@ -243,6 +295,43 @@ export class DataService implements OnDestroy {
   }
 
   /**
+   * Control coordinator light
+   */
+  async setCoordinatorLight(siteId: string, coordId: string, rgb: { r: number, g: number, b: number }): Promise<void> {
+    if (this.mqtt.connected()) {
+      this.mqtt.sendCoordinatorCommand(siteId, coordId, {
+        cmd: 'led.set',
+        r: rgb.r,
+        g: rgb.g,
+        b: rgb.b
+      });
+    }
+  }
+
+  /**
+   * Reset coordinator light
+   */
+  async resetCoordinatorLight(siteId: string, coordId: string): Promise<void> {
+    if (this.mqtt.connected()) {
+      this.mqtt.sendCoordinatorCommand(siteId, coordId, {
+        cmd: 'led.reset'
+      });
+    }
+  }
+
+  /**
+   * Start pairing mode on coordinator
+   */
+  async startPairing(siteId: string, coordId: string, durationMs: number = 60000): Promise<void> {
+    if (this.mqtt.connected()) {
+      this.mqtt.sendCoordinatorCommand(siteId, coordId, {
+        cmd: 'pair',
+        duration_ms: durationMs
+      });
+    }
+  }
+
+  /**
    * Approve node pairing
    */
   async approvePairing(nodeId: string, siteId: string, zoneId?: string): Promise<void> {
@@ -303,7 +392,11 @@ export class DataService implements OnDestroy {
   /**
    * Handle incoming telemetry
    */
-  private handleTelemetry(telemetry: NodeTelemetry | CoordinatorTelemetry): void {
+  private handleTelemetry(telemetry: NodeTelemetry | CoordinatorTelemetry | any): void {
+    if (this.env.isDevelopment) {
+       // console.log('[DataService] Telemetry received:', telemetry);
+    }
+
     if ('node_id' in telemetry) {
       // Node telemetry
       const currentTelemetry = new Map(this.latestTelemetry());
@@ -321,6 +414,47 @@ export class DataService implements OnDestroy {
         node.last_seen = new Date();
         currentNodes.set(telemetry.node_id, node);
         this.nodes.set(currentNodes);
+      }
+    } else if ('coord_id' in telemetry) {
+      // Coordinator telemetry
+      const currentCoords = new Map(this.coordinators());
+      const coord = currentCoords.get(telemetry.coord_id);
+      
+      if (coord) {
+        // Update existing coordinator
+        coord.last_seen = new Date();
+        coord.status = 'online';
+        // Update other fields if available in telemetry
+        if (telemetry.wifi_rssi !== undefined) coord.wifi_rssi = telemetry.wifi_rssi;
+        if (telemetry.light_lux !== undefined) coord.light_lux = telemetry.light_lux;
+        if (telemetry.temp_c !== undefined) coord.temp_c = telemetry.temp_c;
+        if (telemetry.heap_free !== undefined) coord.heap_free = telemetry.heap_free;
+        
+        currentCoords.set(telemetry.coord_id, coord);
+        this.coordinators.set(currentCoords);
+        
+        // Also update the health signal
+        this.coordOnline.set(true);
+      } else {
+        // Create a temporary coordinator entry if it doesn't exist
+        const newCoord: Coordinator = {
+          _id: telemetry.coord_id, // Use coord_id as _id for temp entry
+          coord_id: telemetry.coord_id,
+          site_id: telemetry.site_id || 'site001',
+          mac_address: telemetry.coord_id, // Fallback
+          status: 'online',
+          last_seen: new Date(),
+          created_at: new Date(),
+          updated_at: new Date(),
+          wifi_rssi: telemetry.wifi_rssi,
+          light_lux: telemetry.light_lux,
+          temp_c: telemetry.temp_c,
+          heap_free: telemetry.heap_free
+        };
+        
+        currentCoords.set(telemetry.coord_id, newCoord);
+        this.coordinators.set(currentCoords);
+        this.coordOnline.set(true);
       }
     }
   }
@@ -377,17 +511,26 @@ export class DataService implements OnDestroy {
       await new Promise<void>((resolve, reject) => {
         this.api.getHealth().subscribe({
           next: (health) => {
-            this.apiHealthy.set(health.status === 'healthy');
+            this.apiHealthy.set(health.status === 'healthy' || health.status === 'degraded');
+            this.dbHealthy.set(health.database ?? false);
+            this.mqttBrokerHealthy.set(health.mqtt ?? false);
+            this.coordOnline.set(health.coordinator ?? false);
             resolve();
           },
           error: (err) => {
             this.apiHealthy.set(false);
+            this.dbHealthy.set(false);
+            this.mqttBrokerHealthy.set(false);
+            this.coordOnline.set(false);
             reject(err);
           }
         });
       });
     } catch (error) {
       this.apiHealthy.set(false);
+      this.dbHealthy.set(false);
+      this.mqttBrokerHealthy.set(false);
+      this.coordOnline.set(false);
       if (this.env.isDevelopment) {
         console.error('[DataService] Health check failed:', error);
       }
@@ -401,17 +544,26 @@ export class DataService implements OnDestroy {
     api: boolean;
     websocket: boolean;
     mqtt: boolean;
+    database: boolean;
+    mqttBroker: boolean;
+    coordinator: boolean;
     overall: boolean;
   } {
     const api = this.apiHealthy();
     const websocket = this.wsConnected();
     const mqtt = this.mqttConnected();
+    const database = this.dbHealthy();
+    const mqttBroker = this.mqttBrokerHealthy();
+    const coordinator = this.coordOnline();
     
     return {
       api,
       websocket,
       mqtt,
-      overall: api && websocket && mqtt
+      database,
+      mqttBroker,
+      coordinator,
+      overall: api && websocket && mqtt && database && mqttBroker
     };
   }
 

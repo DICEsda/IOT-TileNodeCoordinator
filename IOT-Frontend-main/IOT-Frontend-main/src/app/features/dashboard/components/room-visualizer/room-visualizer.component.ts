@@ -1,21 +1,14 @@
 import { CommonModule, DatePipe, DecimalPipe } from '@angular/common';
-import { Component, ElementRef, EventEmitter, Input, OnDestroy, OnInit, Output, ViewChild } from '@angular/core';
+import { Component, ElementRef, EventEmitter, Input, OnChanges, OnDestroy, OnInit, Output, SimpleChanges, ViewChild, AfterViewInit, NgZone } from '@angular/core';
 import { Subscription, firstValueFrom } from 'rxjs';
-import { MmwaveFrame, MmwaveTarget } from '../../../../core/models/api.models';
+import { MmwaveFrame, MmwaveTarget, Node } from '../../../../core/models/api.models';
 import { ApiService } from '../../../../core/services/api.service';
 import { MqttService } from '../../../../core/services/mqtt.service';
 
 interface LightNodeState {
-  nodeId: number;
+  nodeId: string;
   totalBulbs: number;
   activeBulbs: number;
-}
-
-interface TargetMarker {
-  id: number;
-  x: number;
-  y: number;
-  strength: number;
 }
 
 @Component({
@@ -24,13 +17,15 @@ interface TargetMarker {
   templateUrl: './room-visualizer.component.html',
   styleUrl: './room-visualizer.component.scss'
 })
-export class RoomVisualizerComponent implements OnInit, OnDestroy {
-  private static readonly NODE_BUCKETS = 6;
+export class RoomVisualizerComponent implements OnInit, OnDestroy, AfterViewInit, OnChanges {
+  private static readonly DEFAULT_BUCKETS = 6;
   private static readonly LIGHTS_PER_NODE = 6;
 
-  @ViewChild('radarCanvas', { static: true }) canvasRef!: ElementRef<HTMLCanvasElement>;
+  @ViewChild('radarCanvas', { static: false }) canvasRef!: ElementRef<HTMLCanvasElement>;
   @Input() siteId: string = 'site001';
   @Input() coordinatorId: string = 'coord001';
+  @Input() registeredNodes: Node[] = [];
+  
   @Output() lightStateChanged = new EventEmitter<{
     totalActive: number;
     nodeStates: LightNodeState[];
@@ -42,41 +37,47 @@ export class RoomVisualizerComponent implements OnInit, OnDestroy {
   latestFrame: MmwaveFrame | null = null;
   frames: MmwaveFrame[] = [];
 
-  private ctx: CanvasRenderingContext2D | null = null;
-  private animationId: number = 0;
-  private sweepAngle = 0;
-  private targetTrail: TargetMarker[] = [];
-  private maxRangeMm = 6000;
-  private pixelRatio = window.devicePixelRatio || 1;
+  private ctx!: CanvasRenderingContext2D;
+  private animationFrameId: number | null = null;
   private mmwaveSubscription?: Subscription;
   private mmwaveTopic?: string;
-  private resizeObserver?: ResizeObserver;
-  private boundWindowResize?: () => void;
+  private bucketCount = RoomVisualizerComponent.DEFAULT_BUCKETS;
 
   constructor(
     private readonly api: ApiService,
-    private readonly mqtt: MqttService
+    private readonly mqtt: MqttService,
+    private readonly ngZone: NgZone
   ) {}
 
   ngOnInit() {
-    const canvas = this.canvasRef.nativeElement;
-    this.ctx = canvas.getContext('2d');
-
-    if (!this.ctx) {
-      console.error('[RoomVisualizer] Unable to acquire canvas context');
-      return;
-    }
-
-    this.setupCanvasSizing();
+    this.updateBucketCount();
     this.emitLightState([]);
     this.loadHistory();
     this.subscribeToRealtime();
-    this.animationId = requestAnimationFrame(this.renderRadar);
+  }
+
+  ngOnChanges(changes: SimpleChanges) {
+    if (changes['registeredNodes']) {
+      this.updateBucketCount();
+    }
+  }
+
+  private updateBucketCount() {
+    if (this.registeredNodes && this.registeredNodes.length > 0) {
+      this.bucketCount = this.registeredNodes.length;
+    } else {
+      this.bucketCount = RoomVisualizerComponent.DEFAULT_BUCKETS;
+    }
+  }
+
+  ngAfterViewInit() {
+    this.initCanvas();
+    this.animate();
   }
 
   ngOnDestroy() {
-    if (this.animationId) {
-      cancelAnimationFrame(this.animationId);
+    if (this.animationFrameId !== null) {
+      cancelAnimationFrame(this.animationFrameId);
     }
 
     if (this.mmwaveSubscription) {
@@ -86,11 +87,106 @@ export class RoomVisualizerComponent implements OnInit, OnDestroy {
     if (this.mmwaveTopic) {
       this.mqtt.unsubscribe(this.mmwaveTopic);
     }
+  }
 
-    if (this.resizeObserver) {
-      this.resizeObserver.disconnect();
-    } else if (this.boundWindowResize) {
-      window.removeEventListener('resize', this.boundWindowResize);
+  private initCanvas() {
+    const canvas = this.canvasRef.nativeElement;
+    const parent = canvas.parentElement;
+    if (parent) {
+      canvas.width = parent.clientWidth;
+      canvas.height = parent.clientHeight;
+    }
+    this.ctx = canvas.getContext('2d')!;
+    
+    // Handle resize
+    window.addEventListener('resize', () => this.onWindowResize());
+  }
+
+  private onWindowResize() {
+    if (!this.canvasRef) return;
+    const canvas = this.canvasRef.nativeElement;
+    const parent = canvas.parentElement;
+    if (parent) {
+      canvas.width = parent.clientWidth;
+      canvas.height = parent.clientHeight;
+    }
+  }
+
+  private animate() {
+    this.ngZone.runOutsideAngular(() => {
+      const loop = () => {
+        this.animationFrameId = requestAnimationFrame(loop);
+        this.draw();
+      };
+      loop();
+    });
+  }
+
+  private draw() {
+    if (!this.ctx || !this.canvasRef) return;
+    const canvas = this.canvasRef.nativeElement;
+    const width = canvas.width;
+    const height = canvas.height;
+    const ctx = this.ctx;
+
+    // Clear
+    ctx.clearRect(0, 0, width, height);
+
+    // Center point (bottom center for radar view)
+    const centerX = width / 2;
+    const centerY = height - 20;
+    const maxRadius = Math.min(width / 2, height - 40);
+    const scale = maxRadius / 6000; // 6000mm (6m) max range
+
+    // Draw Grid
+    ctx.strokeStyle = 'rgba(0, 255, 191, 0.2)';
+    ctx.lineWidth = 1;
+
+    // Arcs (1m, 2m, 3m, 4m, 5m, 6m)
+    for (let i = 1; i <= 6; i++) {
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, i * 1000 * scale, Math.PI, 2 * Math.PI);
+      ctx.stroke();
+    }
+
+    // Radial lines (-60, -30, 0, 30, 60 degrees)
+    const angles = [-60, -30, 0, 30, 60];
+    angles.forEach(angle => {
+      const rad = (angle - 90) * (Math.PI / 180);
+      ctx.beginPath();
+      ctx.moveTo(centerX, centerY);
+      ctx.lineTo(
+        centerX + Math.cos(rad) * maxRadius,
+        centerY + Math.sin(rad) * maxRadius
+      );
+      ctx.stroke();
+    });
+
+    // Draw Targets
+    if (this.latestFrame && this.latestFrame.targets) {
+      this.latestFrame.targets.forEach(target => {
+        // Convert mm to canvas coords
+        // X is left/right, Y is distance (depth)
+        const x = target.position_x_mm || 0;
+        const y = target.position_y_mm || 0;
+
+        // Map to canvas
+        // x: 0 is center. -x is left.
+        const canvasX = centerX + (x * scale);
+        const canvasY = centerY - (y * scale);
+
+        // Draw dot
+        ctx.beginPath();
+        ctx.arc(canvasX, canvasY, 6, 0, 2 * Math.PI);
+        ctx.fillStyle = '#ff0055';
+        ctx.fill();
+        
+        // Draw ripple/pulse
+        ctx.beginPath();
+        ctx.arc(canvasX, canvasY, 12, 0, 2 * Math.PI);
+        ctx.strokeStyle = 'rgba(255, 0, 85, 0.4)';
+        ctx.stroke();
+      });
     }
   }
 
@@ -103,6 +199,10 @@ export class RoomVisualizerComponent implements OnInit, OnDestroy {
           limit: 120
         })
       );
+
+      if (!frames || !Array.isArray(frames)) {
+        return;
+      }
 
       const normalized = frames
         .map(frame => this.normalizeFrame(frame))
@@ -130,41 +230,6 @@ export class RoomVisualizerComponent implements OnInit, OnDestroy {
       },
       error: err => console.error('[RoomVisualizer] MQTT mmWave error', err)
     });
-  }
-
-  private setupCanvasSizing(): void {
-    const canvas = this.canvasRef.nativeElement;
-    const parent = canvas.parentElement ?? canvas;
-
-    const resize = () => {
-      const bounds = parent.getBoundingClientRect();
-      const size = Math.min(bounds.width, bounds.height || bounds.width || 420);
-      this.pixelRatio = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
-
-      canvas.width = size * this.pixelRatio;
-      canvas.height = size * this.pixelRatio;
-      canvas.style.width = `${size}px`;
-      canvas.style.height = `${size}px`;
-
-      const context = this.ctx;
-      if (context) {
-        context.setTransform(1, 0, 0, 1, 0, 0);
-        context.scale(this.pixelRatio, this.pixelRatio);
-      }
-    };
-
-    resize();
-
-    if (typeof window !== 'undefined' && 'ResizeObserver' in window) {
-      this.resizeObserver = new ResizeObserver(() => resize());
-      this.resizeObserver.observe(parent);
-    } else {
-      const win = typeof window !== 'undefined' ? (window as Window) : undefined;
-      if (win) {
-        this.boundWindowResize = resize;
-        win.addEventListener('resize', resize as EventListener);
-      }
-    }
   }
 
   private normalizeFrame(frame: MmwaveFrame): MmwaveFrame {
@@ -254,210 +319,43 @@ export class RoomVisualizerComponent implements OnInit, OnDestroy {
     this.targetCount = frame.targets.length;
     this.lastUpdated = frame.timestamp;
 
-    this.updateMaxRange(frame.targets);
-    this.updateTargetTrail(frame.targets);
     this.emitLightState(frame.targets);
   }
 
-  private updateMaxRange(targets: MmwaveTarget[]): void {
-    if (!targets.length) {
-      return;
-    }
-
-    const maxDistance = targets.reduce((acc, target) => {
-      const distance = target.distance_mm ?? Math.sqrt(target.position_x_mm ** 2 + target.position_y_mm ** 2);
-      return Math.max(acc, distance);
-    }, 0);
-
-    const padded = maxDistance * 1.15;
-    this.maxRangeMm = Math.min(Math.max(padded, 2000), 12000);
-  }
-
-  private updateTargetTrail(targets: MmwaveTarget[]): void {
-    targets.forEach(target => {
-      const existing = this.targetTrail.find(marker => marker.id === target.id);
-      const x = target.position_x_mm ?? 0;
-      const y = target.position_y_mm ?? 0;
-
-      if (existing) {
-        existing.x = x;
-        existing.y = y;
-        existing.strength = 1;
-      } else {
-        this.targetTrail.push({
-          id: target.id,
-          x,
-          y,
-          strength: 1
-        });
-      }
-    });
-  }
-
   private emitLightState(targets: MmwaveTarget[]): void {
-    const buckets = Array.from({ length: RoomVisualizerComponent.NODE_BUCKETS }, (_, index) => ({
-      nodeId: index + 1,
+    const buckets = Array.from({ length: this.bucketCount }, (_, index) => ({
+      nodeId: (index + 1).toString(), // Ensure string ID
       totalBulbs: RoomVisualizerComponent.LIGHTS_PER_NODE,
       activeBulbs: 0
     }));
 
-    const segmentSize = (Math.PI * 2) / RoomVisualizerComponent.NODE_BUCKETS;
+    // If we only have 1 node, map ALL targets to it regardless of position
+    if (this.bucketCount === 1) {
+      if (targets.length > 0) {
+        buckets[0].activeBulbs = RoomVisualizerComponent.LIGHTS_PER_NODE;
+      }
+    } else {
+      // Distribute targets across buckets based on angle
+      const segmentSize = (Math.PI * 2) / this.bucketCount;
 
-    targets.forEach(target => {
-      const angle = Math.atan2(target.position_y_mm ?? 0, target.position_x_mm ?? 0);
-      const normalized = (angle + Math.PI * 2) % (Math.PI * 2);
-      const bucketIndex = Math.min(
-        RoomVisualizerComponent.NODE_BUCKETS - 1,
-        Math.floor(normalized / segmentSize)
-      );
+      targets.forEach(target => {
+        const angle = Math.atan2(target.position_y_mm ?? 0, target.position_x_mm ?? 0);
+        const normalized = (angle + Math.PI * 2) % (Math.PI * 2);
+        const bucketIndex = Math.min(
+          this.bucketCount - 1,
+          Math.floor(normalized / segmentSize)
+        );
 
-      buckets[bucketIndex].activeBulbs = Math.min(
-        RoomVisualizerComponent.LIGHTS_PER_NODE,
-        buckets[bucketIndex].activeBulbs + 1
-      );
-    });
+        buckets[bucketIndex].activeBulbs = Math.min(
+          RoomVisualizerComponent.LIGHTS_PER_NODE,
+          buckets[bucketIndex].activeBulbs + 1
+        );
+      });
+    }
 
     this.lightStateChanged.emit({
       totalActive: targets.length,
       nodeStates: buckets
     });
   }
-
-  private renderRadar = () => {
-    this.animationId = requestAnimationFrame(this.renderRadar);
-
-    const ctx = this.ctx;
-    if (!ctx) {
-      return;
-    }
-
-    const canvas = this.canvasRef.nativeElement;
-  const width = canvas.width / this.pixelRatio;
-  const height = canvas.height / this.pixelRatio;
-    const radius = Math.min(width, height) / 2 - 20;
-
-    ctx.save();
-    ctx.clearRect(0, 0, width, height);
-    this.drawBackground(width, height);
-    ctx.translate(width / 2, height / 2);
-    this.drawGrid(radius);
-    this.drawSweep(radius);
-    this.decayTrail();
-    this.drawTargets(radius);
-    ctx.restore();
-  };
-
-  private drawBackground(width: number, height: number): void {
-    const ctx = this.ctx;
-    if (!ctx) return;
-    const gradient = ctx.createLinearGradient(0, 0, 0, height);
-    gradient.addColorStop(0, '#06121f');
-    gradient.addColorStop(1, '#091a2b');
-
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, width, height);
-  }
-
-  private drawGrid(radius: number): void {
-    const ctx = this.ctx;
-    if (!ctx) return;
-
-    ctx.strokeStyle = 'rgba(0, 255, 191, 0.15)';
-    ctx.lineWidth = 1;
-
-    for (let i = 1; i <= 4; i++) {
-      const r = (radius / 4) * i;
-      ctx.beginPath();
-      ctx.arc(0, 0, r, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-
-    ctx.beginPath();
-    ctx.moveTo(-radius, 0);
-    ctx.lineTo(radius, 0);
-    ctx.moveTo(0, -radius);
-    ctx.lineTo(0, radius);
-    ctx.stroke();
-
-    ctx.font = '12px Inter, sans-serif';
-    ctx.fillStyle = 'rgba(221, 255, 244, 0.6)';
-    ctx.textAlign = 'right';
-    ctx.textBaseline = 'top';
-
-    const labels = [0.25, 0.5, 0.75, 1];
-    labels.forEach(multiplier => {
-      const value = (this.maxRangeMm / 1000) * multiplier;
-      const text = `${value.toFixed(1)} m`;
-      const y = -radius * multiplier;
-      ctx.fillText(text, radius - 4, y + 4);
-    });
-  }
-
-  private drawSweep(radius: number): void {
-    const ctx = this.ctx;
-    if (!ctx) return;
-
-    const sweepWidth = Math.PI / 36; // 5 degrees
-    const startAngle = this.sweepAngle;
-    const endAngle = startAngle + sweepWidth;
-
-    const gradient = ctx.createRadialGradient(0, 0, radius * 0.1, 0, 0, radius);
-    gradient.addColorStop(0, 'rgba(0, 255, 191, 0.0)');
-    gradient.addColorStop(1, 'rgba(0, 255, 191, 0.35)');
-
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.arc(0, 0, radius, startAngle, endAngle);
-    ctx.closePath();
-    ctx.fillStyle = gradient;
-    ctx.fill();
-
-    ctx.strokeStyle = 'rgba(0, 255, 191, 0.8)';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.lineTo(radius * Math.cos(startAngle), radius * Math.sin(startAngle));
-    ctx.stroke();
-
-    this.sweepAngle = (this.sweepAngle + 0.02) % (Math.PI * 2);
-  }
-
-  private drawTargets(radius: number): void {
-    const ctx = this.ctx;
-    if (!ctx) return;
-
-    const scale = radius / this.maxRangeMm;
-
-    this.targetTrail.forEach(marker => {
-      const x = marker.x * scale;
-      const y = -marker.y * scale;
-
-      const alpha = Math.min(1, Math.max(0.2, marker.strength));
-      ctx.fillStyle = `rgba(0, 255, 191, ${alpha})`;
-      ctx.shadowColor = `rgba(0, 255, 191, ${alpha})`;
-      ctx.shadowBlur = 10;
-
-      ctx.beginPath();
-      ctx.arc(x, y, 6, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.shadowBlur = 0;
-      ctx.font = '11px Inter, sans-serif';
-      ctx.fillStyle = `rgba(221, 255, 244, ${alpha})`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'bottom';
-      ctx.fillText(`ID ${marker.id}`, x, y - 8);
-    });
-  }
-
-  private decayTrail(): void {
-    for (let i = this.targetTrail.length - 1; i >= 0; i--) {
-      const marker = this.targetTrail[i];
-      marker.strength = Math.max(0, marker.strength - 0.01);
-      if (marker.strength <= 0.05) {
-        this.targetTrail.splice(i, 1);
-      }
-    }
-  }
 }
-
