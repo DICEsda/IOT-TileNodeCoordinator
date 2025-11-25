@@ -91,7 +91,8 @@ bool EspNow::macStringToBytes(const String& macStr, uint8_t out[6]) {
 }
 
 EspNow::EspNow()
-    : pairingEnabled(false)
+    : initialized(false)
+    , pairingEnabled(false)
     , pairingEndTime(0)
     , messageCallback(nullptr)
     , pairingCallback(nullptr)
@@ -154,8 +155,10 @@ bool EspNow::begin() {
     esp_err_t initResult = esp_now_init();
     if (initResult != ESP_OK) {
         Logger::error("✗ esp_now_init() failed with error %d", initResult);
+        initialized = false;
         return false;
     }
+    initialized = true;
     Logger::info("  ✓ ESP-NOW v2.0 initialized successfully");
 
     // Set a PMK (even if we use unencrypted peers) to improve compatibility on some stacks
@@ -245,7 +248,49 @@ bool EspNow::begin() {
     return true;
 }
 
+bool EspNow::isInitialized() const {
+    return initialized;
+}
+
 void EspNow::loop() {
+    // Critical: Check if ESP-NOW is still initialized (WiFi reconnect can deinit it!)
+    if (!initialized) {
+        static uint32_t lastReinitAttempt = 0;
+        uint32_t now = millis();
+        // Try to reinitialize every 5 seconds
+        if (now - lastReinitAttempt > 5000) {
+            lastReinitAttempt = now;
+            Logger::warn("ESP-NOW deinitialized! Attempting reinit...");
+            // Don't call full begin() - just reinit ESP-NOW
+            esp_err_t initResult = esp_now_init();
+            if (initResult == ESP_OK) {
+                initialized = true;
+                Logger::info("✓ ESP-NOW reinitialized successfully");
+                // Re-register callbacks
+                esp_now_register_recv_cb(staticRecvCallback);
+                esp_now_register_send_cb(staticSendCallback);
+                // Re-add broadcast peer
+                esp_now_peer_info_t peerInfo = {};
+                memset(&peerInfo, 0, sizeof(peerInfo));
+                memcpy(peerInfo.peer_addr, "\xFF\xFF\xFF\xFF\xFF\xFF", 6);
+                peerInfo.channel = 1;
+                peerInfo.encrypt = false;
+                peerInfo.ifidx = WIFI_IF_STA;
+                esp_now_add_peer(&peerInfo);
+                // Re-add all known peers
+                for (const auto& macStr : peers) {
+                    uint8_t peerMac[6];
+                    if (macStringToBytes(macStr, peerMac)) {
+                        addPeer(peerMac);
+                    }
+                }
+            } else {
+                Logger::error("ESP-NOW reinit failed: %d", initResult);
+            }
+        }
+        return; // Don't proceed if not initialized
+    }
+    
     // Debug: Periodically log that we're alive and waiting
     static uint32_t lastDebugLog = 0;
     uint32_t now = millis();
@@ -425,6 +470,12 @@ bool EspNow::sendToMac(const uint8_t mac[6], const String& json) {
     // ✓ Checklist: Error Handling - Check send result
     esp_err_t res = esp_now_send(mac, (uint8_t*)json.c_str(), json.length());
     if (res != ESP_OK) {
+        // ESP_ERR_ESPNOW_NOT_INIT (12389) means ESP-NOW was deinitialized!
+        if (res == ESP_ERR_ESPNOW_NOT_INIT || res == 12389) {
+            Logger::error("ESP-NOW not initialized (error %d)! Marking for reinit.", res);
+            initialized = false;
+            return false;
+        }
         // ESP_ERR_ESPNOW_NOT_FOUND (12393) means peer not registered - try adding
         if (res == ESP_ERR_ESPNOW_NOT_FOUND) {
             Logger::info("Peer %s not found in ESP-NOW, adding...", macStr);
@@ -456,10 +507,17 @@ bool EspNow::addPeer(const uint8_t mac[6]) {
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     String smac(macStr);
     
+    // Get current WiFi channel (will match router channel when connected)
+    uint8_t currentChannel = 1;
+    wifi_second_chan_t second = WIFI_SECOND_CHAN_NONE;
+    esp_wifi_get_channel(&currentChannel, &second);
+    
+    Logger::info("Adding peer %s on channel %d", macStr, currentChannel);
+    
     // Always try to add peer to ESP-NOW (it will return EXIST if already there)
     esp_now_peer_info_t peerInfo = {};
     memcpy(peerInfo.peer_addr, mac, 6);
-    peerInfo.channel = 1; // Must match coordinator's channel
+    peerInfo.channel = currentChannel; // Use actual WiFi channel (router's channel)
     peerInfo.encrypt = false; // ✓ Checklist: Encryption disabled
     peerInfo.ifidx = WIFI_IF_STA;
     
@@ -477,7 +535,7 @@ bool EspNow::addPeer(const uint8_t mac[6]) {
             peers.push_back(smac);
             savePeersToStorage();
         }
-        Logger::info("✓ Peer registered: %s", macStr);
+        Logger::info("✓ Peer registered: %s on channel %d", macStr, currentChannel);
         return true;
     } else if (res == ESP_ERR_ESPNOW_EXIST) {
         // Already exists in ESP-NOW - ensure it's in our cache
@@ -494,6 +552,10 @@ bool EspNow::addPeer(const uint8_t mac[6]) {
         }
         Logger::debug("Peer already registered: %s", macStr);
         return true;
+    } else if (res == ESP_ERR_ESPNOW_NOT_INIT || res == 12389) {
+        Logger::error("ESP-NOW not initialized when adding peer %s! Marking for reinit.", macStr);
+        initialized = false;
+        return false;
     } else {
         Logger::warn("✗ Failed to add peer %s: error %d", macStr, res);
         return false;
@@ -513,6 +575,48 @@ bool EspNow::removePeer(const uint8_t mac[6]) {
     }
     Logger::warn("Failed to remove peer: %d", res);
     return false;
+}
+
+void EspNow::updatePeerChannels() {
+    uint8_t currentChannel = 1;
+    wifi_second_chan_t second = WIFI_SECOND_CHAN_NONE;
+    esp_wifi_get_channel(&currentChannel, &second);
+    
+    Logger::info("Updating all ESP-NOW peers to channel %d", currentChannel);
+    
+    // Update broadcast peer
+    uint8_t bcast[6];
+    memset(bcast, 0xFF, 6);
+    esp_now_peer_info_t peerInfo = {};
+    if (esp_now_get_peer(bcast, &peerInfo) == ESP_OK) {
+        if (peerInfo.channel != currentChannel) {
+            esp_now_del_peer(bcast);
+            memcpy(peerInfo.peer_addr, bcast, 6);
+            peerInfo.channel = currentChannel;
+            peerInfo.encrypt = false;
+            peerInfo.ifidx = WIFI_IF_STA;
+            esp_now_add_peer(&peerInfo);
+            Logger::info("  ✓ Broadcast peer updated to channel %d", currentChannel);
+        }
+    }
+    
+    // Update all registered peers
+    for (const auto& macStr : peers) {
+        uint8_t mac[6];
+        if (macStringToBytes(macStr, mac)) {
+            if (esp_now_get_peer(mac, &peerInfo) == ESP_OK) {
+                if (peerInfo.channel != currentChannel) {
+                    esp_now_del_peer(mac);
+                    memcpy(peerInfo.peer_addr, mac, 6);
+                    peerInfo.channel = currentChannel;
+                    peerInfo.encrypt = false;
+                    peerInfo.ifidx = WIFI_IF_STA;
+                    esp_now_add_peer(&peerInfo);
+                    Logger::debug("  ✓ Peer %s updated to channel %d", macStr.c_str(), currentChannel);
+                }
+            }
+        }
+    }
 }
 
 void EspNow::clearAllPeers() {

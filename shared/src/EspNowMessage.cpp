@@ -42,6 +42,7 @@ JoinAcceptMessage::JoinAcceptMessage() {
 	type = MessageType::JOIN_ACCEPT;
 	msg = "join_accept";
 	ts = millis();
+	wifi_channel = 1; // Default to channel 1
 	// Initialize config struct with defaults
 	cfg.pwm_freq = 0;
 	cfg.rx_window_ms = 20;
@@ -54,6 +55,7 @@ String JoinAcceptMessage::toJson() const {
 	doc["node_id"] = node_id;
 	doc["light_id"] = light_id;
 	doc["lmk"] = lmk;
+	doc["wifi_channel"] = wifi_channel;
 	doc["cfg"]["pwm_freq"] = cfg.pwm_freq;
 	doc["cfg"]["rx_window_ms"] = cfg.rx_window_ms;
 	doc["cfg"]["rx_period_ms"] = cfg.rx_period_ms;
@@ -61,16 +63,18 @@ String JoinAcceptMessage::toJson() const {
 }
 
 bool JoinAcceptMessage::fromJson(const String& json) {
-	DynamicJsonDocument doc(512); // Increased from 256 to handle nested objects
+	DynamicJsonDocument doc(768); // Increased to handle full join_accept with nested config
 	DeserializationError err = deserializeJson(doc, json);
 	if (err) {
-		Serial.printf("JSON parse error: %s\n", err.c_str());
+		Serial.printf("JoinAccept parse error: %s (buffer may be too small)\n", err.c_str());
+		Serial.printf("  Message length: %d bytes\n", json.length());
 		return false;
 	}
 	msg = doc["msg"].as<String>();
 	node_id = doc["node_id"].as<String>();
 	light_id = doc["light_id"].as<String>();
 	lmk = doc["lmk"].as<String>();
+	wifi_channel = doc["wifi_channel"] | 1; // Default to 1 if missing
 	cfg.pwm_freq = doc["cfg"]["pwm_freq"].as<int>();
 	cfg.rx_window_ms = doc["cfg"]["rx_window_ms"].as<int>();
 	cfg.rx_period_ms = doc["cfg"]["rx_period_ms"].as<int>();
@@ -232,9 +236,17 @@ EspNowMessage* MessageFactory::createMessage(const String& json) {
 }
 
 MessageType MessageFactory::getMessageType(const String& json) {
-	DynamicJsonDocument doc(96);
-	DeserializationError err = deserializeJson(doc, json);
-	if (err) return MessageType::ERROR;
+	// Use filter to only extract "msg" field - more memory efficient
+	DynamicJsonDocument filter(48);
+	filter["msg"] = true;
+	
+	DynamicJsonDocument doc(256);
+	DeserializationError err = deserializeJson(doc, json, DeserializationOption::Filter(filter));
+	if (err) {
+		Serial.printf("MessageFactory: Failed to parse message type: %s\n", err.c_str());
+		return MessageType::ERROR;
+	}
+	
 	String m = doc["msg"].as<String>();
 	if (m == "join_request") return MessageType::JOIN_REQUEST;
 	if (m == "join_accept") return MessageType::JOIN_ACCEPT;

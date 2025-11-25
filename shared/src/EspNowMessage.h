@@ -49,6 +49,7 @@ struct JoinAcceptMessage : public EspNowMessage {
 	String node_id;
 	String light_id;
 	String lmk;           // link master key (ESP-NOW LMK)
+	uint8_t wifi_channel; // WiFi channel coordinator is using
 	struct Cfg {
 		int pwm_freq;
 		int rx_window_ms;

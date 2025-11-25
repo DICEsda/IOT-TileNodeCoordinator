@@ -1,4 +1,5 @@
 #include "Mqtt.h"
+#include "MqttLogger.h"
 #include "../utils/Logger.h"
 #include <ArduinoJson.h>
 
@@ -130,7 +131,7 @@ void Mqtt::loop() {
     if (!wifiReady) {
         if (mqttClient.connected()) {
             mqttClient.disconnect();
-            Logger::warn("MQTT disconnected (Wi-Fi unavailable)");
+            MqttLogger::logDisconnect(-1); // WiFi lost
         }
         return;
     }
@@ -156,6 +157,9 @@ void Mqtt::loop() {
     }
 
     mqttClient.loop();
+    
+    // Periodic heartbeat logging (every 60 seconds)
+    MqttLogger::logHeartbeat(mqttClient.connected(), 60000);
 }
 
 bool Mqtt::isConnected() {
@@ -250,10 +254,15 @@ void Mqtt::publishMmWaveEvent(const MmWaveEvent& event) {
 }
 
 void Mqtt::publishNodeStatus(const NodeStatusMessage& status) {
-    if (!mqttClient.connected()) return;
+    if (!mqttClient.connected()) {
+        MqttLogger::logPublish("node_telemetry", "", false, 0);
+        return;
+    }
+    
+    uint32_t startMs = millis();
     
     StaticJsonDocument<1024> doc;
-    doc["ts"] = millis() / 1000;
+    doc["ts"] = startMs / 1000;
     doc["node_id"] = status.node_id;
     doc["light_id"] = status.light_id;
     doc["avg_r"] = status.avg_r;
@@ -270,7 +279,11 @@ void Mqtt::publishNodeStatus(const NodeStatusMessage& status) {
     serializeJson(doc, payload);
     
     String topic = nodeTelemetryTopic(status.node_id);
-    mqttClient.publish(topic.c_str(), payload.c_str());
+    bool success = mqttClient.publish(topic.c_str(), payload.c_str());
+    
+    // Detailed logging
+    MqttLogger::logPublish(topic, payload, success, payload.length());
+    MqttLogger::logLatency("NodeStatus", startMs);
 }
 
 void Mqtt::setBrokerConfig(const char* host, uint16_t port, const char* username, const char* password) {
@@ -317,7 +330,6 @@ bool Mqtt::connectMqtt() {
     }
     
     warnIfLoopbackHost();
-    Logger::info("Connecting to MQTT broker: %s:%d", brokerHost.c_str(), brokerPort);
     
     if (coordId.isEmpty()) {
         coordId = WiFi.macAddress();
@@ -331,14 +343,14 @@ bool Mqtt::connectMqtt() {
         connected = mqttClient.connect(clientId.c_str());
     }
     
+    // Log connection result with detailed info
+    MqttLogger::logConnect(brokerHost, brokerPort, clientId, connected);
+    
     if (connected) {
-        Logger::info("MQTT connected!");
-        
         // Subscribe to coordinator commands (PRD-compliant)
         String cmdTopic = coordinatorCmdTopic();
-        mqttClient.subscribe(cmdTopic.c_str());
-        
-        Logger::info("Subscribed to: %s", cmdTopic.c_str());
+        bool subSuccess = mqttClient.subscribe(cmdTopic.c_str());
+        MqttLogger::logSubscribe(cmdTopic, subSuccess);
         
         // Publish initial telemetry
         CoordinatorSensorSnapshot snapshot;
@@ -633,6 +645,9 @@ void Mqtt::runReachabilityProbe() {
 }
 
 void Mqtt::handleMqttMessage(char* topic, uint8_t* payload, unsigned int length) {
+    // Log incoming message with detailed info
+    MqttLogger::logReceive(String(topic), payload, length);
+    
     if (mqttInstance && mqttInstance->commandCallback) {
         String topicStr = String(topic);
         String payloadStr = String((char*)payload, length);
@@ -641,11 +656,16 @@ void Mqtt::handleMqttMessage(char* topic, uint8_t* payload, unsigned int length)
 }
 
 void Mqtt::processMessage(const String& topic, const String& payload) {
-    Logger::info("MQTT message received: %s", topic.c_str());
+    uint32_t startMs = millis();
     
     if (commandCallback) {
         commandCallback(topic, payload);
+        MqttLogger::logProcess(topic, "Command processed", true);
+    } else {
+        MqttLogger::logProcess(topic, "No callback", false, "callback not registered");
     }
+    
+    MqttLogger::logLatency("ProcessMessage", startMs);
 }
 
 void Mqtt::publishCoordinatorTelemetry(const CoordinatorSensorSnapshot& snapshot) {

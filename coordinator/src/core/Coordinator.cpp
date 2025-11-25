@@ -7,6 +7,7 @@
 #include <ArduinoJson.h>
 #if defined(ARDUINO_ARCH_ESP32)
 #include <esp32-hal.h>
+#include <esp_wifi.h>
 #endif
 
 Coordinator::Coordinator()
@@ -60,6 +61,20 @@ bool Coordinator::begin() {
 
     Logger::info("Objects created, starting initialization...");
 
+    // Initialize ESP-NOW first (before WiFi connects)
+    Logger::info("Initializing ESP-NOW...");
+    bool espNowOk = espNow->begin();
+    recordBootStatus("ESP-NOW", espNowOk, espNowOk ? "Radio ready" : "init failed");
+    if (!espNowOk) {
+        Logger::error("Failed to initialize ESP-NOW");
+        return false;
+    }
+    Logger::info("ESP-NOW initialized successfully");
+    publishLog("ESP-NOW initialized successfully", "INFO", "setup");
+
+    // Link EspNow to WiFi so channels sync on connection
+    wifi->setEspNow(espNow);
+
     bool wifiReady = wifi && wifi->begin();
     WifiManager::Status wifiState;
     if (wifi) {
@@ -77,17 +92,6 @@ bool Coordinator::begin() {
     if (!wifiReady) {
         Logger::warn("Wi-Fi not connected at boot; continuing with offline fallback");
     }
-
-    // Initialize all components
-    Logger::info("Initializing ESP-NOW...");
-    bool espNowOk = espNow->begin();
-    recordBootStatus("ESP-NOW", espNowOk, espNowOk ? "Radio ready" : "init failed");
-    if (!espNowOk) {
-        Logger::error("Failed to initialize ESP-NOW");
-        return false;
-    }
-    Logger::info("ESP-NOW initialized successfully");
-    publishLog("ESP-NOW initialized successfully", "INFO", "setup");
 
     // Register message callback for regular node messages
     espNow->setMessageCallback([this](const String& nodeId, const uint8_t* data, size_t len) {
@@ -136,10 +140,16 @@ bool Coordinator::begin() {
         // Add as ESP-NOW peer (unencrypted) - this now handles duplicates gracefully
         espNow->addPeer(mac);
 
+        // Get current WiFi channel
+        uint8_t currentChannel = 1;
+        wifi_second_chan_t second = WIFI_SECOND_CHAN_NONE;
+        esp_wifi_get_channel(&currentChannel, &second);
+        
         JoinAcceptMessage accept;
         accept.node_id = nodeId;
         accept.light_id = nodes->getLightForNode(nodeId);
         accept.lmk = ""; // Unencrypted for now
+        accept.wifi_channel = currentChannel; // Tell node which channel to use
         accept.cfg.pwm_freq = 0; // Not used but set explicitly
         accept.cfg.rx_window_ms = 20;
         accept.cfg.rx_period_ms = 100;

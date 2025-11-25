@@ -32,13 +32,24 @@ func corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-var Module = fx.Module("http",
+var Module = fx.Options(
 	fx.Provide(
 		NewHandler,
+		NewWSBroadcaster,
 	),
 	fx.Invoke(RegisterHandlers),
+	fx.Invoke(StartBroadcaster),
 	fx.Invoke(NewHTTPServer),
 )
+
+func StartBroadcaster(lc fx.Lifecycle, broadcaster *WSBroadcaster) {
+	lc.Append(fx.Hook{
+		OnStart: func(ctx context.Context) error {
+			broadcaster.Start()
+			return nil
+		},
+	})
+}
 
 func NewHTTPServer(lc fx.Lifecycle, r *mux.Router, cfg *config.Config) {
 	handler := corsMiddleware(r)

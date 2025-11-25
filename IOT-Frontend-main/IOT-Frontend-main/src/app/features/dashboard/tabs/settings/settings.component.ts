@@ -22,14 +22,13 @@ interface NodeStatus {
 })
 export class SettingsComponent implements OnInit, OnDestroy {
   // Coordinator
-  coordinatorId = ''; // Will be discovered from MQTT telemetry
+  coordinatorId = 'coord001';
   siteId = 'site001';
   coordinatorOnline = signal(false);
   firmwareVersion = '1.0.0';
   pairingMode = signal(false);
   pairingTimeLeft = 0;
   private pairingTimer?: any;
-  private coordinatorDiscovered = false;
 
   // Node (single node)
   node = signal<NodeStatus | null>(null);
@@ -83,28 +82,8 @@ export class SettingsComponent implements OnInit, OnDestroy {
 
   ngOnInit() {
     this.loadSettings();
-    // Note: loadNode() will be called after coordinator ID is discovered
-    
-    // Subscribe to coordinator telemetry to discover coordinator ID
-    const coordSub = this.mqtt.subscribeCoordinatorTelemetry(this.siteId, '+').subscribe({
-      next: (data: any) => {
-        // Extract coordinator ID from MQTT topic or payload
-        if (!this.coordinatorDiscovered && data.coord_id) {
-          this.coordinatorId = data.coord_id;
-          this.coordinatorDiscovered = true;
-          console.log('[Settings] Discovered coordinator ID:', this.coordinatorId);
-          // Now check coordinator status and load nodes
-          this.checkCoordinatorStatus();
-          this.loadNode();
-        }
-        // Update online status
-        if (data.coord_id === this.coordinatorId) {
-          this.coordinatorOnline.set(true);
-        }
-      },
-      error: (err: any) => console.error('Coordinator telemetry error:', err)
-    });
-    this.subscriptions.push(coordSub);
+    this.loadNode();
+    this.checkCoordinatorStatus();
     
     // Subscribe to node updates
     const nodeSub = this.mqtt.subscribeNodeTelemetry(this.siteId, '+').subscribe({
@@ -119,21 +98,9 @@ export class SettingsComponent implements OnInit, OnDestroy {
             last_seen: new Date()
           });
         }
-      },
-      error: (err: any) => console.error('Node telemetry error:', err)
+      }
     });
     this.subscriptions.push(nodeSub);
-    
-    // Fallback: try checking status after 2 seconds if no telemetry received
-    setTimeout(() => {
-      if (!this.coordinatorDiscovered) {
-        console.warn('[Settings] No coordinator telemetry received, attempting direct query');
-        // Try with default coord001 or MAC address format
-        this.coordinatorId = 'coord001';
-        this.checkCoordinatorStatus();
-        this.loadNode();
-      }
-    }, 2000);
   }
 
   ngOnDestroy() {
@@ -191,30 +158,13 @@ export class SettingsComponent implements OnInit, OnDestroy {
   }
 
   async checkCoordinatorStatus() {
-    if (!this.coordinatorId) {
-      console.warn('[Settings] Cannot check coordinator status: ID not yet discovered');
-      return;
-    }
-    
     try {
       const coordinator = await this.api.getCoordinator(this.siteId, this.coordinatorId).toPromise();
-      if (coordinator) {
-        // Coordinator exists in database, consider it online
-        this.coordinatorOnline.set(true);
-        this.firmwareVersion = coordinator.fw_version || '1.0.0';
-        console.log('[Settings] Coordinator found via API:', coordinator);
-      }
-    } catch (error: any) {
-      const errorMsg = error?.message || error?.toString() || '';
-      if (errorMsg.includes('404')) {
-        console.warn(`[Settings] Coordinator ${this.coordinatorId} not found in database yet (waiting for telemetry)`);
-      } else {
-        console.error('Failed to check coordinator status:', error);
-      }
-      // Don't set offline if 404 - coordinator may just not be in DB yet but is publishing MQTT
-      if (!errorMsg.includes('404')) {
-        this.coordinatorOnline.set(false);
-      }
+      this.coordinatorOnline.set(coordinator?.status === 'online');
+      this.firmwareVersion = coordinator?.firmware_version || '1.0.0';
+    } catch (error) {
+      console.error('Failed to check coordinator status:', error);
+      this.coordinatorOnline.set(false);
     }
   }
 

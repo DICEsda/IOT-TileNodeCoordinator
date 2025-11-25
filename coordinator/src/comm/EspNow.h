@@ -31,6 +31,7 @@ public:
 
     bool begin();
     void loop();
+    bool isInitialized() const;
 
     // Communication
     bool sendLightCommand(const String& nodeId, uint8_t brightness, uint16_t fadeMs = 0, bool overrideStatus = false, uint16_t ttlMs = 1500);
@@ -61,6 +62,7 @@ public:
     PeerStats getPeerStats(const String& macStr) const;
 
 private:
+    bool initialized;
     bool pairingEnabled;
     uint32_t pairingEndTime;
     std::function<void(const String& nodeId, const uint8_t* data, size_t len)> messageCallback;
@@ -76,4 +78,7 @@ private:
     
     // Connection quality tracking
     std::map<String, PeerStats> peerStats;
+
+public:
+    void updatePeerChannels();
 };

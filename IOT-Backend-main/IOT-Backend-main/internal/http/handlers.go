@@ -3,6 +3,7 @@ package http
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -20,19 +21,22 @@ import (
 type Params struct {
 	fx.In
 
-	Repo       repository.Repository
-	MqttClient mqtt.Client
+	Repo        repository.Repository
+	MqttClient  mqtt.Client
+	Broadcaster *WSBroadcaster
 }
 
 type Handler struct {
-	Repo       repository.Repository
-	mqttClient mqtt.Client
+	Repo        repository.Repository
+	mqttClient  mqtt.Client
+	broadcaster *WSBroadcaster
 }
 
 func NewHandler(p Params) *Handler {
 	return &Handler{
-		Repo:       p.Repo,
-		mqttClient: p.MqttClient,
+		Repo:        p.Repo,
+		mqttClient:  p.MqttClient,
+		broadcaster: p.Broadcaster,
 	}
 }
 
@@ -65,6 +69,9 @@ func RegisterHandlers(h *Handler, router *mux.Router) {
 	router.HandleFunc("/api/v1/node/test-color", h.SendNodeColor).Methods("POST")
 	router.HandleFunc("/api/v1/node/off", h.TurnOffNode).Methods("POST")
 	router.HandleFunc("/api/v1/node/brightness", h.SetNodeBrightness).Methods("POST")
+	
+	// Live Monitor Light Control API
+	router.HandleFunc("/api/v1/node/light/control", h.ControlNodeLight).Methods("POST")
 
 	// Settings API
 	router.HandleFunc("/api/v1/settings", h.GetSettings).Methods("GET")
@@ -410,5 +417,76 @@ func (h *Handler) healthCheck(w http.ResponseWriter, r *http.Request) {
 		"mqtt":        mqttHealthy,
 		"coordinator": coordOnline,
 		"timestamp":   time.Now().Unix(),
+	})
+}
+
+// ControlNodeLight handles live monitor light control commands
+func (h *Handler) ControlNodeLight(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		SiteID     string `json:"site_id"`
+		NodeID     string `json:"node_id"`
+		On         bool   `json:"on"`
+		Brightness int    `json:"brightness"` // 0-255
+	}
+	
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	
+	// Validate inputs
+	if req.SiteID == "" || req.NodeID == "" {
+		http.Error(w, "site_id and node_id are required", http.StatusBadRequest)
+		return
+	}
+	
+	if req.Brightness < 0 || req.Brightness > 255 {
+		http.Error(w, "brightness must be between 0 and 255", http.StatusBadRequest)
+		return
+	}
+	
+	// Build the set_light command for the node
+	// When ON, use green color (0, 255, 0) as specified
+	// The node will control the SK6812B strip
+	cmdPayload := map[string]interface{}{
+		"cmd":        "set_light",
+		"on":         req.On,
+		"brightness": req.Brightness,
+		"r":          0,
+		"g":          255, // Always green when on
+		"b":          0,
+		"w":          0,
+	}
+	
+	if !req.On {
+		// When off, set all channels to 0
+		cmdPayload["brightness"] = 0
+		cmdPayload["g"] = 0
+	}
+	
+	payloadBytes, err := json.Marshal(cmdPayload)
+	if err != nil {
+		http.Error(w, "Failed to create command", http.StatusInternalServerError)
+		return
+	}
+	
+	// Publish to the node command topic: site/{siteId}/node/{nodeId}/cmd
+	topic := fmt.Sprintf("site/%s/node/%s/cmd", req.SiteID, req.NodeID)
+	token := h.mqttClient.Publish(topic, 1, false, payloadBytes)
+	token.Wait()
+	
+	if err := token.Error(); err != nil {
+		log.Printf("Failed to publish light command: %v", err)
+		http.Error(w, "Failed to send command", http.StatusInternalServerError)
+		return
+	}
+	
+	log.Printf("Light control command sent to %s: on=%v, brightness=%d", req.NodeID, req.On, req.Brightness)
+	
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Command sent successfully",
+		"topic":   topic,
 	})
 }

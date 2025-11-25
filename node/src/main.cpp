@@ -220,6 +220,7 @@ private:
     // ESP-NOW
     uint8_t coordinatorMac[6];
     bool espNowInitialized;
+    int coordChannel = 1; // WiFi channel for ESP-NOW
     
     // RGBW LED strip
     LedController leds{4}; // PRD: 4 pixels per node
@@ -378,10 +379,10 @@ bool SmartTileNode::begin() {
         leds.setStatus(LedController::StatusMode::Idle);
         Serial.println("Node: OPERATIONAL (awaiting link)");
     } else {
+        // No configuration - automatically enter pairing mode
         currentState = NodeState::PAIRING;
-        // Don't auto-start pairing - wait for button press
-        leds.setStatus(LedController::StatusMode::Idle);
-        Serial.println("Node: unpaired. Hold button for 2s to enter pairing mode.");
+        startPairing();
+        Serial.println("Node: unpaired. Auto-entering pairing mode.");
     }
     
     // Force periodic telemetry every 5 seconds per requirement
@@ -408,6 +409,24 @@ void SmartTileNode::loop() {
         case NodeState::REBOOT:
             handleReboot();
             break;
+    }
+    
+    // Auto-enter pairing if operational but link is dead for >30 seconds
+    if (currentState == NodeState::OPERATIONAL && !inPairingMode) {
+        static uint32_t linkLostTime = 0;
+        
+        if (!isLinkAlive()) {
+            if (linkLostTime == 0) {
+                linkLostTime = millis();
+            } else if (millis() - linkLostTime > 30000) { // 30 seconds without link
+                Serial.println("Link dead for 30s - auto-entering pairing mode");
+                currentState = NodeState::PAIRING;
+                startPairing();
+                linkLostTime = 0;
+            }
+        } else {
+            linkLostTime = 0; // Reset timer when link is alive
+        }
     }
     
     // While operational and not overriding/pairing, reflect link health on LEDs
@@ -621,31 +640,56 @@ bool SmartTileNode::initEspNow() {
         logMessage("WARN", String("  PMK set failed: ") + String((int)pmkRes));
     }
     
-    // Set WiFi channel to 1 (must match coordinator)
-    logMessage("INFO", "[4/9] Setting WiFi channel to 1...");
+    // Scan for WiFi networks to find the coordinator's router channel
+    logMessage("INFO", "[4/9] Scanning for WiFi networks to detect coordinator channel...");
+    coordChannel = 1; // Default to channel 1
+    
+    // Try to scan for a known SSID pattern (if you know your router's SSID)
+    // This helps the node match the channel the coordinator is using
+    int numNetworks = WiFi.scanNetworks();
+    if (numNetworks > 0) {
+        logMessage("INFO", String("  Found ") + String(numNetworks) + String(" WiFi networks"));
+        // Use the strongest network's channel as a good guess for coordinator channel
+        // (assuming coordinator connects to one of these networks)
+        int bestRSSI = -100;
+        for (int i = 0; i < numNetworks; i++) {
+            int rssi = WiFi.RSSI(i);
+            if (rssi > bestRSSI) {
+                bestRSSI = rssi;
+                coordChannel = WiFi.channel(i);
+            }
+        }
+        logMessage("INFO", String("  Using strongest network channel: ") + String(coordChannel));
+    } else {
+        logMessage("WARN", "  No networks found, using default channel 1");
+    }
+    WiFi.scanDelete();
+    
+    // Set WiFi channel to match coordinator
+    logMessage("INFO", String("[5/9] Setting WiFi channel to ") + String(coordChannel) + String("..."));
     esp_wifi_set_promiscuous(true);
-    esp_err_t chRes = esp_wifi_set_channel(1, WIFI_SECOND_CHAN_NONE);
+    esp_err_t chRes = esp_wifi_set_channel(coordChannel, WIFI_SECOND_CHAN_NONE);
     esp_wifi_set_promiscuous(false);
     
     uint8_t primary = 0; 
     wifi_second_chan_t second = WIFI_SECOND_CHAN_NONE;
     esp_wifi_get_channel(&primary, &second);
     
-    if (primary != 1) {
-        logMessage("ERROR", String("Failed to set channel! Now on: ") + String((int)primary));
+    if (primary != coordChannel) {
+        logMessage("ERROR", String("Failed to set channel! Wanted: ") + String(coordChannel) + String(", Got: ") + String((int)primary));
         return false;
     }
     logMessage("INFO", String("  Channel: ") + String((int)primary));
     
     // Set WiFi protocol for compatibility
-    logMessage("INFO", "[5/9] Setting WiFi protocol...");
+    logMessage("INFO", "[6/9] Setting WiFi protocol...");
     esp_err_t protocolRes = esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
     if (protocolRes == ESP_OK) {
         logMessage("INFO", "  WiFi protocol set (802.11b/g/n)");
     }
     
     // ✓ Checklist: Callbacks - Register v2 callbacks
-    logMessage("INFO", "[6/9] Registering ESP-NOW v2 callbacks...");
+    logMessage("INFO", "[7/9] Registering ESP-NOW v2 callbacks...");
     gNodeInstance = this;
     
     esp_err_t recvResult = esp_now_register_recv_cb(espnowRecv);
@@ -668,7 +712,7 @@ bool SmartTileNode::initEspNow() {
     
     esp_now_peer_info_t peerInfo = {};
     memcpy(peerInfo.peer_addr, bcast, 6);
-    peerInfo.channel = 1;
+    peerInfo.channel = coordChannel;
     peerInfo.encrypt = false;
     peerInfo.ifidx = WIFI_IF_STA;
     
@@ -822,6 +866,21 @@ void SmartTileNode::processReceivedMessage(const String& json) {
             JoinAcceptMessage* accept = static_cast<JoinAcceptMessage*>(message);
             nodeId = accept->node_id;
             lightId = accept->light_id;
+            
+            // Switch to coordinator's WiFi channel
+            if (accept->wifi_channel > 0 && accept->wifi_channel != coordChannel) {
+                Serial.printf("Switching to coordinator's WiFi channel: %d\n", accept->wifi_channel);
+                coordChannel = accept->wifi_channel;
+                esp_wifi_set_promiscuous(true);
+                esp_wifi_set_channel(coordChannel, WIFI_SECOND_CHAN_NONE);
+                esp_wifi_set_promiscuous(false);
+                
+                // Verify channel change
+                uint8_t actualChannel = 0;
+                wifi_second_chan_t second = WIFI_SECOND_CHAN_NONE;
+                esp_wifi_get_channel(&actualChannel, &second);
+                Serial.printf("Channel now: %d\n", actualChannel);
+            }
             
             config.setString(ConfigKeys::NODE_ID, nodeId);
             config.setString(ConfigKeys::LIGHT_ID, lightId);
@@ -1055,7 +1114,7 @@ bool SmartTileNode::ensureEncryptedPeer(const uint8_t mac[6], const String& /*lm
     // Add as unencrypted peer
     esp_now_peer_info_t peerInfo = {};
     memcpy(peerInfo.peer_addr, mac, 6);
-    peerInfo.channel = 1;
+    peerInfo.channel = coordChannel;
     peerInfo.encrypt = false;
     peerInfo.ifidx = WIFI_IF_STA;
     

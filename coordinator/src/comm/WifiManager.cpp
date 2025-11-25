@@ -1,5 +1,6 @@
 #include "WifiManager.h"
 #include "../utils/Logger.h"
+#include "EspNow.h"
 
 WifiManager::WifiManager()
     : config("wifi")
@@ -80,7 +81,9 @@ bool WifiManager::attemptConnect(const String& ssid, const String& password, boo
     }
     Logger::info("Connecting to Wi-Fi: %s", ssid.c_str());
 
-    WiFi.disconnect(true, true);
+    // CRITICAL: Use WiFi.disconnect(false, false) to avoid deinitializing ESP-NOW
+    // The second parameter (true) would erase WiFi config AND deinit radio, breaking ESP-NOW!
+    WiFi.disconnect(false, false);
     delay(100);
     WiFi.begin(ssid.c_str(), password.c_str());
 
@@ -101,6 +104,10 @@ bool WifiManager::attemptConnect(const String& ssid, const String& password, boo
         Serial.printf("✓ Wi-Fi connected: %s (IP %s, RSSI %d)\n",
                       status.ssid.c_str(), WiFi.localIP().toString().c_str(), WiFi.RSSI());
         Logger::info("Wi-Fi connected: %s", status.ssid.c_str());
+        
+        if (espNow) {
+            espNow->updatePeerChannels();
+        }
         return true;
     }
 

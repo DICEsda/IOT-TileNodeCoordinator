@@ -25,6 +25,8 @@ public:
     bool isConnected() const { return status.connected; }
     bool isOffline() const { return status.offlineMode; }
     Status getStatus() const { return status; }
+    
+    void setEspNow(class EspNow* espNowPtr) { espNow = espNowPtr; }
 
 private:
     ConfigManager config;
@@ -32,6 +34,7 @@ private:
     String storedPassword;
     Status status;
     uint32_t lastReconnectAttempt;
+    class EspNow* espNow = nullptr;
 
     bool attemptConnect(const String& ssid, const String& password, bool verbose = true);
     bool interactiveSetup();

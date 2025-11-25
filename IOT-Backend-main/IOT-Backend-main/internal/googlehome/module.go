@@ -4,7 +4,7 @@ import (
 	"go.uber.org/fx"
 )
 
-var Module = fx.Module("googlehome",
+var Module = fx.Options(
 	fx.Provide(
 		NewGoogleHomeService,
 		NewHandler,

@@ -398,6 +398,7 @@ export class DataService implements OnDestroy {
     }
 
     if ('node_id' in telemetry) {
+      console.log('[DataService] Processing node telemetry for:', telemetry.node_id);
       // Node telemetry
       const currentTelemetry = new Map(this.latestTelemetry());
       currentTelemetry.set(telemetry.node_id, telemetry);
@@ -405,16 +406,44 @@ export class DataService implements OnDestroy {
 
       // Update node in map
       const currentNodes = new Map(this.nodes());
-      const node = currentNodes.get(telemetry.node_id);
+      let node = currentNodes.get(telemetry.node_id);
+      
       if (node) {
-        node.rgbw = telemetry.rgbw;
-        node.temperature = telemetry.temperature;
-        node.battery_voltage = telemetry.battery_voltage;
-        node.battery_percent = telemetry.battery_percent;
+        console.log('[DataService] Updating existing node:', telemetry.node_id);
+        // Update existing node
+        node.rgbw = { r: telemetry.avg_r || 0, g: telemetry.avg_g || 0, b: telemetry.avg_b || 0, w: telemetry.avg_w || 0 };
+        node.temperature = telemetry.temp_c;
+        node.battery_voltage = telemetry.vbat_mv ? telemetry.vbat_mv / 1000 : undefined;
+        node.battery_percent = telemetry.vbat_mv ? Math.min(100, Math.max(0, ((telemetry.vbat_mv - 3000) / (4200 - 3000)) * 100)) : undefined;
+        node.brightness = telemetry.brightness;
+        node.status = 'online';
         node.last_seen = new Date();
         currentNodes.set(telemetry.node_id, node);
-        this.nodes.set(currentNodes);
+      } else {
+        console.log('[DataService] Creating new node:', telemetry.node_id);
+        // Create new node if it doesn't exist
+        node = {
+          _id: telemetry.node_id,
+          node_id: telemetry.node_id,
+          name: telemetry.light_id || telemetry.node_id,
+          site_id: this.activeSiteId() || 'site001',
+          mac_address: telemetry.node_id,
+          paired: true,
+          status: 'online',
+          rgbw: { r: telemetry.avg_r || 0, g: telemetry.avg_g || 0, b: telemetry.avg_b || 0, w: telemetry.avg_w || 0 },
+          brightness: telemetry.brightness,
+          temperature: telemetry.temp_c,
+          battery_voltage: telemetry.vbat_mv ? telemetry.vbat_mv / 1000 : undefined,
+          battery_percent: telemetry.vbat_mv ? Math.min(100, Math.max(0, ((telemetry.vbat_mv - 3000) / (4200 - 3000)) * 100)) : undefined,
+          last_seen: new Date(),
+          created_at: new Date(),
+          updated_at: new Date()
+        };
+        currentNodes.set(telemetry.node_id, node);
       }
+      
+      console.log('[DataService] Nodes map now has', currentNodes.size, 'nodes');
+      this.nodes.set(currentNodes);
     } else if ('coord_id' in telemetry) {
       // Coordinator telemetry
       const currentCoords = new Map(this.coordinators());
