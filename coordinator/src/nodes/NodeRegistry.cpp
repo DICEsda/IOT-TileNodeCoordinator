@@ -86,16 +86,10 @@ bool NodeRegistry::unregisterNode(const String& nodeId) {
 }
 
 void NodeRegistry::clearAllNodes() {
-    size_t count = nodes.size();
     nodes.clear();
     lightToNode.clear();
-    
-    if (prefsInitialized) {
-        prefs.clear();
-        prefs.putUInt("count", 0);
-    }
-    
-    Logger::info("Cleared all nodes (count: %d)", count);
+    saveToStorage();
+    Logger::info("Cleared all nodes from registry");
 }
 
 void NodeRegistry::startPairing(uint32_t durationMs) {
@@ -122,14 +116,6 @@ bool NodeRegistry::processPairingRequest(const uint8_t* mac, const String& nodeI
         Logger::warning("Rejected pairing request from %s: pairing not active", nodeId.c_str());
         return false;
     }
-    
-    // Check if already registered - if so, just update lastSeen and return success
-    if (nodes.find(nodeId) != nodes.end()) {
-        Logger::info("Re-pairing known node %s", nodeId.c_str());
-        nodes[nodeId].lastSeenMs = millis();
-        return true; // Allow re-pairing
-    }
-    
     // Generate a stable light ID from MAC last 3 bytes
     char lightIdBuf[16];
     snprintf(lightIdBuf, sizeof(lightIdBuf), "L%02X%02X%02X", mac[3], mac[4], mac[5]);
@@ -172,6 +158,15 @@ String NodeRegistry::getNodeForLight(const String& lightId) const {
 String NodeRegistry::getLightForNode(const String& nodeId) const {
     auto it = nodes.find(nodeId);
     return it != nodes.end() ? it->second.lightId : String();
+}
+
+std::vector<String> NodeRegistry::getAllNodeMacs() const {
+    std::vector<String> macs;
+    macs.reserve(nodes.size());
+    for (const auto& pair : nodes) {
+        macs.push_back(pair.first); // nodeId is the MAC address
+    }
+    return macs;
 }
 
 void NodeRegistry::loadFromStorage() {

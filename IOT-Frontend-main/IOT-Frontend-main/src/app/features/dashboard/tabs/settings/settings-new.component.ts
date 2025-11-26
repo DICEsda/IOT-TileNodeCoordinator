@@ -1,10 +1,12 @@
 import { CommonModule } from '@angular/common';
-import { Component, signal, OnInit, OnDestroy } from '@angular/core';
+import { Component, signal, OnInit, OnDestroy, computed } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../../../core/services/api.service';
 import { MqttService } from '../../../../core/services/mqtt.service';
+import { DataService } from '../../../../core/services/data.service';
 import { Subscription } from 'rxjs';
 import { SystemSettings, SettingsUpdateMessage } from '../../../../core/models/settings.models';
+import { Zone, Node, Coordinator } from '../../../../core/models/api.models';
 
 @Component({
   selector: 'app-settings-new',
@@ -39,11 +41,16 @@ export class SettingsNewComponent implements OnInit, OnDestroy {
   // WiFi properties
   wifiSSID = '';
   wifiPassword = '';
+  currentWifiSSID = '';
+  currentWifiPassword = '';
   
   // MQTT properties
   mqttBroker = '';
   mqttUsername = '';
   mqttPassword = '';
+  currentMqttBroker = '';
+  currentMqttUsername = '';
+  currentMqttPassword = '';
   
   // Google Home integration
   googleHomeEnabled = false;
@@ -65,8 +72,16 @@ export class SettingsNewComponent implements OnInit, OnDestroy {
   nodeName = '';
   testColor = '#ffffff';
   
-  // Zones
-  zones: string[] = ['Living Room', 'Bedroom', 'Kitchen'];
+  // Zones (old - kept for backward compatibility)
+  zones: string[] = [];
+  
+  // Zone Management
+  managedZones = signal<Zone[]>([]);
+  showZoneForm = false;
+  newZoneName = '';
+  newZoneCoordinator = '';
+  isCreatingZone = false;
+  zoneFlashMessage = '';
   
   // Coordinator status
   coordinatorId = 'COORD-001';
@@ -79,9 +94,17 @@ export class SettingsNewComponent implements OnInit, OnDestroy {
   // Node management
   node = signal<any>(null);
 
+  // Computed properties
+  availableCoordinators = computed(() => {
+    const allCoords = Array.from(this.data.coordinators().values());
+    const assignedCoordIds = this.managedZones().map(z => z.coordinator_id);
+    return allCoords.filter(c => !assignedCoordIds.includes(c.coord_id));
+  });
+
   constructor(
     private api: ApiService,
-    private mqtt: MqttService
+    private mqtt: MqttService,
+    private data: DataService
   ) {}
 
   ngOnInit() {
@@ -92,6 +115,10 @@ export class SettingsNewComponent implements OnInit, OnDestroy {
       }
     });
     this.subscriptions.push(settingsSub);
+    
+    // Load zones and settings
+    this.loadZones();
+    this.loadSettings();
   }
 
   ngOnDestroy() {
@@ -134,6 +161,13 @@ export class SettingsNewComponent implements OnInit, OnDestroy {
       const data = await this.api.getSystemSettings().toPromise();
       if (data?.data) {
         this.settings.set(data.data);
+        
+        // Populate current credentials for display (dev mode - exposed)
+        this.currentWifiSSID = data.data.wifi_ssid || 'Not configured';
+        this.currentWifiPassword = data.data.wifi_password || 'Not set';
+        this.currentMqttBroker = data.data.mqtt_broker || 'Not configured';
+        this.currentMqttUsername = data.data.mqtt_username || 'Not set';
+        this.currentMqttPassword = data.data.mqtt_password || 'Not set';
       }
     } catch (error) {
       console.error('Failed to load settings:', error);
@@ -240,32 +274,94 @@ export class SettingsNewComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Add a new zone to the zones list
+   * Load zones from backend
    */
-  addZone() {
-    const settings = this.settings();
-    if (!settings) return;
-    
-    const zoneName = prompt('Enter zone name:');
-    if (!zoneName) return;
-    
-    const updated = { ...settings };
-    updated.zones.default_zones = [...updated.zones.default_zones, zoneName];
-    this.settings.set(updated);
+  async loadZones() {
+    try {
+      const siteId = 'default-site'; // TODO: Get from actual site context
+      const response = await this.api.getZones(siteId).toPromise();
+      if (response && response.zones) {
+        this.managedZones.set(response.zones);
+      }
+    } catch (error) {
+      console.error('Failed to load zones:', error);
+    }
   }
 
   /**
-   * Remove a zone from the zones list
+   * Show zone creation form
    */
-  removeZone(index: number) {
-    const settings = this.settings();
-    if (!settings) return;
-    
-    if (!confirm('Remove this zone?')) return;
-    
-    const updated = { ...settings };
-    updated.zones.default_zones = updated.zones.default_zones.filter((_, i) => i !== index);
-    this.settings.set(updated);
+  cancelZoneForm() {
+    this.showZoneForm = false;
+    this.newZoneName = '';
+    this.newZoneCoordinator = '';
+  }
+
+  /**
+   * Create a new zone
+   */
+  async createZone() {
+    if (!this.newZoneName || !this.newZoneCoordinator) {
+      return;
+    }
+
+    this.isCreatingZone = true;
+    try {
+      const siteId = 'default-site'; // TODO: Get from actual site context
+      const response = await this.api.createZone(
+        this.newZoneName,
+        siteId,
+        this.newZoneCoordinator
+      ).toPromise();
+
+      if (response && response.zone) {
+        // Add to local list
+        this.managedZones.set([...this.managedZones(), response.zone]);
+        
+        // Show flash confirmation
+        this.zoneFlashMessage = `✓ Zone "${this.newZoneName}" created! Coordinator is flashing green.`;
+        setTimeout(() => this.zoneFlashMessage = '', 5000);
+        
+        // Reset form
+        this.cancelZoneForm();
+      }
+    } catch (error: any) {
+      console.error('Failed to create zone:', error);
+      alert(error?.message || 'Failed to create zone. Please try again.');
+    } finally {
+      this.isCreatingZone = false;
+    }
+  }
+
+  /**
+   * Delete zone with confirmation
+   */
+  async deleteZoneConfirm(zone: Zone) {
+    if (!confirm(`Delete zone "${zone.name}"? This will unassign all nodes from this zone.`)) {
+      return;
+    }
+
+    try {
+      await this.api.deleteZone(zone._id!).toPromise();
+      
+      // Remove from local list
+      this.managedZones.set(this.managedZones().filter(z => z._id !== zone._id));
+      
+      // Show flash confirmation
+      this.zoneFlashMessage = `✓ Zone "${zone.name}" deleted! Coordinator is flashing green.`;
+      setTimeout(() => this.zoneFlashMessage = '', 5000);
+    } catch (error: any) {
+      console.error('Failed to delete zone:', error);
+      alert(error?.message || 'Failed to delete zone. Please try again.');
+    }
+  }
+
+  /**
+   * Get nodes assigned to a specific zone
+   */
+  getNodesInZone(zoneId: string): Node[] {
+    const allNodes = Array.from(this.data.nodes().values());
+    return allNodes.filter(node => node.zone_id === zoneId);
   }
 
   /**

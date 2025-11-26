@@ -4,6 +4,7 @@ import {
   Site,
   Coordinator,
   Node,
+  Zone,
   SetLightCommand,
   ColorProfileCommand,
   PairingApproval,
@@ -485,6 +486,49 @@ export class ApiService {
       timeout(this.env.apiTimeout),
       catchError(err => throwError(() => this.handleError(err)))
     );
+  }
+
+  // ============================================================================
+  // Zone Management API
+  // ============================================================================
+
+  /**
+   * Get all zones for a site
+   */
+  getZones(siteId: string): Observable<{ zones: Zone[] }> {
+    return this.get<{ zones: Zone[] }>(`/api/v1/zones?site_id=${siteId}`);
+  }
+
+  /**
+   * Get a specific zone
+   */
+  getZone(zoneId: string): Observable<Zone> {
+    return this.get<Zone>(`/api/v1/zones/${zoneId}`);
+  }
+
+  /**
+   * Create a new zone
+   */
+  createZone(zoneName: string, siteId: string, coordinatorId: string): Observable<{ status: string, message: string, zone: Zone }> {
+    return this.post<{ status: string, message: string, zone: Zone }>('/api/v1/zones', {
+      name: zoneName,
+      site_id: siteId,
+      coordinator_id: coordinatorId
+    });
+  }
+
+  /**
+   * Update a zone
+   */
+  updateZone(zoneId: string, updates: Partial<{ name: string, coordinator_id: string }>): Observable<{ status: string, message: string, zone: Zone }> {
+    return this.put<{ status: string, message: string, zone: Zone }>(`/api/v1/zones/${zoneId}`, updates);
+  }
+
+  /**
+   * Delete a zone
+   */
+  deleteZone(zoneId: string): Observable<{ status: string, message: string }> {
+    return this.delete<{ status: string, message: string }>(`/api/v1/zones/${zoneId}`);
   }
 
   /**

@@ -38,6 +38,14 @@ type Repository interface {
 	// Settings operations
 	GetSettings(siteId string) (*Settings, error)
 	SaveSettings(settings *Settings) error
+
+	// Zone operations
+	CreateZone(ctx context.Context, zone *types.Zone) error
+	GetZoneById(id string) (*types.Zone, error)
+	GetZonesBySite(siteId string) ([]*types.Zone, error)
+	GetZoneByCoordinator(siteId string, coordinatorId string) (*types.Zone, error)
+	DeleteZone(ctx context.Context, zoneId string) error
+	UpdateZone(ctx context.Context, zone *types.Zone) error
 }
 
 // Settings represents system settings (moved here from http package)
@@ -48,8 +56,17 @@ type Settings struct {
 	LightIntensity    int      `bson:"light_intensity" json:"light_intensity"`
 	AutoOffDelay      int      `bson:"auto_off_delay" json:"auto_off_delay"`
 	Zones             []string `bson:"zones" json:"zones"`
+	
+	// WiFi credentials
+	WifiSSID          string   `bson:"wifi_ssid,omitempty" json:"wifi_ssid,omitempty"`
+	WifiPassword      string   `bson:"wifi_password,omitempty" json:"wifi_password,omitempty"`
+	
+	// MQTT credentials
 	MqttBroker        string   `bson:"mqtt_broker,omitempty" json:"mqtt_broker,omitempty"`
 	MqttUsername      string   `bson:"mqtt_username,omitempty" json:"mqtt_username,omitempty"`
+	MqttPassword      string   `bson:"mqtt_password,omitempty" json:"mqtt_password,omitempty"`
+	
+	// Google Home
 	GoogleHomeEnabled bool     `bson:"google_home_enabled" json:"google_home_enabled"`
 	GoogleProjectID   string   `bson:"google_project_id,omitempty" json:"google_project_id,omitempty"`
 	GoogleClientID    string   `bson:"google_client_id,omitempty" json:"google_client_id,omitempty"`

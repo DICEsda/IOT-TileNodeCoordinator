@@ -19,13 +19,40 @@ bool WifiManager::begin() {
     WiFi.mode(WIFI_STA);
     WiFi.setSleep(false);
 
+    // Try stored credentials first
     if (!storedSsid.isEmpty()) {
+        Serial.printf("Found stored Wi-Fi: %s\n", storedSsid.c_str());
         if (attemptConnect(storedSsid, storedPassword)) {
             return true;
         }
+        // Connection failed with stored credentials
+        Serial.println("✗ Stored credentials failed to connect.");
+        Serial.println("Would you like to:");
+        Serial.println("  1) Retry existing credentials");
+        Serial.println("  2) Configure new Wi-Fi network");
+        Serial.println("  3) Continue offline");
+        Serial.print("Enter choice (1-3): ");
+        String choice = promptLine("", false);
+        choice.trim();
+        
+        if (choice == "1") {
+            Serial.println("Retrying stored credentials in background...");
+            // Will retry in loop()
+            return false;
+        } else if (choice == "3") {
+            status.offlineMode = true;
+            Serial.println("Continuing in offline mode. Use serial menu to configure later.");
+            return false;
+        }
+        // Fall through to interactive setup for choice "2" or invalid input
+    } else {
+        // No stored credentials
+        Serial.println("═══════════════════════════════════════");
+        Serial.println("  No Wi-Fi credentials configured");
+        Serial.println("═══════════════════════════════════════");
     }
 
-    Serial.println("No Wi-Fi connection found. Configure Wi-Fi? (y/n)");
+    Serial.println("Configure Wi-Fi? (y/n)");
     if (!promptYesNo("") ) {
         status.offlineMode = true;
         Serial.println("Continuing in offline mode. MQTT will retry when Wi-Fi becomes available.");
@@ -217,4 +244,32 @@ void WifiManager::updateStatusCache() {
     status.ssid = status.connected ? WiFi.SSID() : "";
     status.rssi = status.connected ? WiFi.RSSI() : -127;
     status.ip = status.connected ? WiFi.localIP() : IPAddress();
+}
+
+bool WifiManager::reconfigureWifi() {
+    Serial.println("═══════════════════════════════════════");
+    Serial.println("  Wi-Fi Reconfiguration");
+    Serial.println("═══════════════════════════════════════");
+    
+    if (WiFi.status() == WL_CONNECTED) {
+        Serial.printf("Currently connected to: %s\n", WiFi.SSID().c_str());
+        Serial.println("This will disconnect and configure a new network.");
+        Serial.println("Continue? (y/n)");
+        if (!promptYesNo("")) {
+            Serial.println("Reconfiguration cancelled.");
+            return false;
+        }
+        WiFi.disconnect(false, false);
+        delay(500);
+    }
+    
+    bool configured = interactiveSetup();
+    if (configured) {
+        status.offlineMode = false;
+        Serial.println("✓ Wi-Fi reconfigured successfully!");
+        return true;
+    } else {
+        Serial.println("✗ Wi-Fi reconfiguration failed or cancelled.");
+        return false;
+    }
 }

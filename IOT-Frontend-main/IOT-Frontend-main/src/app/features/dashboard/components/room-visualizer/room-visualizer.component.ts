@@ -4,6 +4,7 @@ import { Subscription, firstValueFrom } from 'rxjs';
 import { MmwaveFrame, MmwaveTarget, Node } from '../../../../core/models/api.models';
 import { ApiService } from '../../../../core/services/api.service';
 import { MqttService } from '../../../../core/services/mqtt.service';
+import { Radar2DComponent } from '../radar-2d/radar-2d.component';
 
 interface LightNodeState {
   nodeId: string;
@@ -13,7 +14,7 @@ interface LightNodeState {
 
 @Component({
   selector: 'app-room-visualizer',
-  imports: [CommonModule, DatePipe, DecimalPipe],
+  imports: [CommonModule, DatePipe, DecimalPipe, Radar2DComponent],
   templateUrl: './room-visualizer.component.html',
   styleUrl: './room-visualizer.component.scss'
 })
@@ -47,9 +48,12 @@ export class RoomVisualizerComponent implements OnInit, OnDestroy, AfterViewInit
     private readonly api: ApiService,
     private readonly mqtt: MqttService,
     private readonly ngZone: NgZone
-  ) {}
+  ) {
+    console.log('[RoomVisualizer] Constructor - siteId:', this.siteId, 'coordinatorId:', this.coordinatorId);
+  }
 
   ngOnInit() {
+    console.log('[RoomVisualizer] ngOnInit - siteId:', this.siteId, 'coordinatorId:', this.coordinatorId);
     this.updateBucketCount();
     this.emitLightState([]);
     this.loadHistory();
@@ -71,8 +75,9 @@ export class RoomVisualizerComponent implements OnInit, OnDestroy, AfterViewInit
   }
 
   ngAfterViewInit() {
-    this.initCanvas();
-    this.animate();
+    // Canvas initialization disabled - using Radar3D component instead
+    // this.initCanvas();
+    // this.animate();
   }
 
   ngOnDestroy() {

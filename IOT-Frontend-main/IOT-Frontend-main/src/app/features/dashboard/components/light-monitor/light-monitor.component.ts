@@ -13,6 +13,7 @@ interface LightNode {
   bulbs: Bulb[];
   totalOn: number;
   status: 'active' | 'idle' | 'offline';
+  tempC?: number; // Temperature in Celsius
 }
 
 interface LightNodeState {
@@ -60,7 +61,8 @@ export class LightMonitorComponent implements OnChanges {
         name: node.name || `Node ${node.node_id.substring(0, 4)}`,
         bulbs: Array.from({ length: 6 }, (_, i) => ({ id: i + 1, isOn: false })),
         totalOn: 0,
-        status: node.status === 'online' ? 'idle' : 'offline'
+        status: node.status === 'online' ? 'idle' : 'offline',
+        tempC: node.temperature
       }));
     } else {
       // Fallback to single node for development if no nodes registered
@@ -94,10 +96,14 @@ export class LightMonitorComponent implements OnChanges {
         isOn: index < nodeState.activeBulbs
       }));
 
+      // Get updated temperature from registeredNodes
+      const registeredNode = this.registeredNodes.find(n => n.node_id === node.id);
+      
       return {
         ...node,
         bulbs: updatedBulbs,
         totalOn: nodeState.activeBulbs,
+        tempC: registeredNode?.temperature ?? node.tempC,
         status: nodeState.activeBulbs > 0 ? ('active' as const) : ('idle' as const)
       };
     });

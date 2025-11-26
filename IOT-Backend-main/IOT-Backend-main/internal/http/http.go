@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/DICEsda/IOT-TileNodeCoordinator/backend/internal/config"
+	"github.com/DICEsda/IOT-TileNodeCoordinator/backend/internal/types"
 	"github.com/gorilla/mux"
 	"go.uber.org/fx"
 )
@@ -34,6 +35,11 @@ func corsMiddleware(next http.Handler) http.Handler {
 
 var Module = fx.Options(
 	fx.Provide(
+		NewRadarCache,
+		fx.Annotate(
+			NewRadarCache,
+			fx.As(new(RadarCacheProvider)),
+		),
 		NewHandler,
 		NewWSBroadcaster,
 	),
@@ -41,6 +47,11 @@ var Module = fx.Options(
 	fx.Invoke(StartBroadcaster),
 	fx.Invoke(NewHTTPServer),
 )
+
+type RadarCacheProvider interface {
+	Set(siteId, coordId string, frame *types.MmwaveFrame)
+	Get(siteId, coordId string) *types.MmwaveFrame
+}
 
 func StartBroadcaster(lc fx.Lifecycle, broadcaster *WSBroadcaster) {
 	lc.Append(fx.Hook{

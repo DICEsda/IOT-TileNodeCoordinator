@@ -25,10 +25,20 @@
         <div class="node-header">
           <div class="node-info">
             <h4>{{ node.name }}</h4>
-            <span class="node-status" [class]="node.status">
-              <span class="status-dot"></span>
-              {{ node.status }}
-            </span>
+            <div class="node-meta">
+              <span class="node-status" [class]="node.status">
+                <span class="status-dot"></span>
+                {{ node.status }}
+              </span>
+              @if (node.tempC !== undefined && node.tempC !== null) {
+                <span class="node-temp">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"/>
+                  </svg>
+                  {{ node.tempC.toFixed(1) }}°C
+                </span>
+              }
+            </div>
           </div>
           <button
             class="toggle-all-btn"
@@ -64,6 +74,29 @@
         </div>
       </div>
     }
+
+    <!-- Pair More Nodes Card -->
+    <div class="pair-card card">
+      <div class="pair-card-content">
+        <div class="pair-icon">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="8" x2="12" y2="16"/>
+            <line x1="8" y1="12" x2="16" y2="12"/>
+          </svg>
+        </div>
+        <div class="pair-text">
+          <h4>Pair More Nodes</h4>
+          <p>Add additional smart light nodes to expand your control</p>
+        </div>
+        <button class="pair-btn">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>
+          </svg>
+          Start Pairing
+        </button>
+      </div>
+    </div>
   </div>
 </div>
 

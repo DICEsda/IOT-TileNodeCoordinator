@@ -18,11 +18,12 @@ export interface Site {
 }
 
 export interface Zone {
-  zone_id: string;
+  _id?: string;
   name: string;
-  nodes: string[];
-  presence: boolean;
-  last_event?: Date;
+  site_id: string;
+  coordinator_id: string;
+  created_at?: Date;
+  updated_at?: Date;
 }
 
 // ============================================================================

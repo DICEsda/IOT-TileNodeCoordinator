@@ -30,29 +30,8 @@
           </svg>
           Devices & Sensors
         </button>
-        <button
-          class="tab-button"
-          [class.active]="activeTab() === 'logs'"
-          (click)="setActiveTab('logs')">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-            <polyline points="14 2 14 8 20 8"/>
-            <line x1="16" y1="13" x2="8" y2="13"/>
-            <line x1="16" y1="17" x2="8" y2="17"/>
-            <line x1="10" y1="9" x2="8" y2="9"/>
-          </svg>
-          Logs
-        </button>
-        <button
-          class="tab-button"
-          [class.active]="activeTab() === 'calibrate'"
-          (click)="setActiveTab('calibrate')">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="3"/>
-            <path d="M12 1v6m0 6v6M5.64 5.64l4.24 4.24m4.24 4.24l4.24 4.24M1 12h6m6 0h6M5.64 18.36l4.24-4.24m4.24-4.24l4.24-4.24"/>
-          </svg>
-          Calibrate
-        </button>
+
+
         <button
           class="tab-button"
           [class.active]="activeTab() === 'customize'"
@@ -111,6 +90,8 @@
         <div class="bottom-section">
           <div class="visualizer-section">
             <app-room-visualizer 
+              [siteId]="'site001'"
+              [coordinatorId]="'coord001'"
               (lightStateChanged)="onLightStateChanged($event)"
               [registeredNodes]="registeredNodes()">
             </app-room-visualizer>
@@ -136,12 +117,8 @@
     @if (activeTab() === 'devices') {
       <app-devices></app-devices>
     }
-    @if (activeTab() === 'logs') {
-      <app-logs></app-logs>
-    }
-    @if (activeTab() === 'calibrate') {
-      <app-calibrate></app-calibrate>
-    }
+
+
     @if (activeTab() === 'customize') {
       <app-customize></app-customize>
     }

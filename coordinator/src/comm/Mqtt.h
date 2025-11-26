@@ -40,6 +40,9 @@ public:
     uint16_t getBrokerPort() const { return brokerPort; }
     String getSiteId() const { return siteId; }
     String getCoordinatorId() const { return coordId; }
+    
+    // Interactive configuration
+    bool runProvisioningWizard();
 
 private:
     WiFiClient wifiClient;
@@ -65,7 +68,6 @@ private:
     bool connectMqtt();
     bool ensureConfigLoaded();
     bool loadConfigFromStore();
-    bool runProvisioningWizard();
     void persistConfig();
     static void handleMqttMessage(char* topic, uint8_t* payload, unsigned int length);
     void processMessage(const String& topic, const String& payload);

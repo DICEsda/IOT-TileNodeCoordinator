@@ -55,8 +55,12 @@ body {
   background: var(--bg-card);
   border: none;
   border-radius: 8px;
-  padding: 1.5rem;
+  padding: 1.25rem;
   box-shadow: none;
+  
+  @media (max-width: 768px) {
+    padding: 1rem;
+  }
 }
 
 .button {

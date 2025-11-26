@@ -18,27 +18,31 @@ public:
     bool isOnline() const;
     uint16_t getRestartCount() const { return totalRestarts; }
 
+    // Make these public so callback can access them
+    uint32_t lastFrameMs = 0;
+    uint8_t consecutiveFailures = 0;
+    bool radarReady = false;
+
 private:
     static constexpr uint32_t PRESENCE_DEBOUNCE_MS = 150; // debounce between state changes
-    static constexpr uint32_t MIN_PUBLISH_INTERVAL_MS = 120; // limit MQTT event rate
-    static constexpr uint8_t MAX_SENSOR_TARGETS = 4; // LD2450 supports up to 4 in latest firmware
+    static constexpr uint32_t MIN_PUBLISH_INTERVAL_MS = 120; // limit MQTT event rate (~8.3 Hz)
+    static constexpr uint8_t MAX_SENSOR_TARGETS = 3; // LD2450 v1.0.1 supports 3 targets (TARGET_1, TARGET_2, TARGET_3)
     static constexpr uint32_t STREAM_STALE_MS = 2500;
+    static constexpr uint8_t SERIAL_LOG_DIVIDER = 3; // Log every Nth frame to serial (1=all, 3=every 3rd)
     static constexpr uint32_t RESTART_BACKOFF_MS = 1500;
     static constexpr uint8_t MAX_RESTARTS_BEFORE_OFFLINE = 4;
     static constexpr uint32_t OFFLINE_RETRY_MS = 15000;
 
     // LD2450 radar instance (UART streaming)
     HardwareSerial* radarSerial;
-    bool radarReady = false;
     uint32_t lastPublishMs = 0;
-    uint32_t lastFrameMs = 0;
-    uint8_t consecutiveFailures = 0;
     uint16_t totalRestarts = 0;
     uint8_t restartAttempts = 0;
     uint32_t lastRestartMs = 0;
     uint32_t offlineSinceMs = 0;
     bool sensorSuppressed = false;
     bool offlineHintPrinted = false;
+    uint32_t frameCounter = 0; // For serial logging throttle
     
     std::function<void(const MmWaveEvent& event)> eventCallback;
     String currentZone;

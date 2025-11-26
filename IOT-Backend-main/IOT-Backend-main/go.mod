@@ -4,11 +4,14 @@ go 1.23
 
 require (
 	github.com/eclipse/paho.mqtt.golang v1.4.3
+	github.com/fogleman/gg v1.3.0
+	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0
 	github.com/gorilla/mux v1.8.1
 	github.com/gorilla/websocket v1.5.3
 	go.mongodb.org/mongo-driver v1.17.4
 	go.uber.org/fx v1.24.0
 	go.uber.org/zap v1.26.0
+	golang.org/x/image v0.18.0
 	golang.org/x/oauth2 v0.15.0
 	gopkg.in/yaml.v3 v3.0.1
 )

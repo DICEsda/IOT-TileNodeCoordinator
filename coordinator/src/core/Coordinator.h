@@ -110,4 +110,5 @@ private:
     void printSerialTelemetry();
     void recordBootStatus(const char* name, bool ok, const String& detail);
     void printBootSummary();
+    void handleSerialCommands();
 };

@@ -63,6 +63,100 @@
   gap: 1rem;
 }
 
+.pair-card {
+  border: 2px dashed rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.02);
+  transition: all 0.3s ease;
+  cursor: pointer;
+
+  &:hover {
+    border-color: rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .pair-card-content {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    padding: 0.5rem;
+
+    @media (max-width: 900px) {
+      flex-direction: column;
+      text-align: center;
+    }
+  }
+
+  .pair-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 64px;
+    height: 64px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 12px;
+    color: var(--text-muted);
+    transition: all 0.3s ease;
+
+    svg {
+      transition: transform 0.3s ease;
+    }
+  }
+
+  &:hover .pair-icon {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-primary);
+
+    svg {
+      transform: rotate(90deg);
+    }
+  }
+
+  .pair-text {
+    flex: 1;
+
+    h4 {
+      margin: 0 0 0.25rem 0;
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    p {
+      margin: 0;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+  }
+
+  .pair-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1.5rem;
+    background: var(--bg-tertiary);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: var(--text-primary);
+    border-radius: 8px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+
+    svg {
+      width: 18px;
+      height: 18px;
+    }
+
+    &:hover {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: rgba(255, 255, 255, 0.2);
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+  }
+}
+
 .node-card {
   border-left: none;
   transition: all 0.3s ease;
@@ -85,6 +179,12 @@
         font-size: 0.875rem;
         font-weight: 600;
         color: var(--text-primary);
+      }
+
+      .node-meta {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
       }
 
       .node-status {
@@ -130,6 +230,23 @@
           .status-dot {
             background: var(--accent-danger);
           }
+        }
+      }
+
+      .node-temp {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        padding: 0.25rem 0.75rem;
+        border-radius: 12px;
+        font-size: 0.75rem;
+        font-weight: 500;
+        background: rgba(59, 130, 246, 0.1);
+        color: #60a5fa;
+
+        svg {
+          width: 14px;
+          height: 14px;
         }
       }
     }

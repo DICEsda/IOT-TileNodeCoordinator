@@ -16,8 +16,8 @@ RUN go mod download && go mod verify
 # Copy source code (includes host go.sum which may be empty)
 COPY . .
 
-# Ensure go.mod and go.sum are consistent with sources
-RUN go mod tidy && go mod verify
+# Tidy dependencies to update go.sum
+RUN go mod tidy
 
 # Build the application
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main ./cmd/iot

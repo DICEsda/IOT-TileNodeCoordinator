@@ -36,6 +36,9 @@ public:
     // Node-Light mapping
     String getNodeForLight(const String& lightId) const;
     String getLightForNode(const String& nodeId) const;
+    
+    // Get all stored node MAC addresses (for re-pairing on boot)
+    std::vector<String> getAllNodeMacs() const;
 
 private:
     std::map<String, NodeInfo> nodes;

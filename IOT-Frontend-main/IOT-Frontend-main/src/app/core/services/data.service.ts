@@ -62,8 +62,8 @@ export class DataService implements OnDestroy {
    * Initialize the service
    */
   private initialize(): void {
-    // Connect to real-time services
-    this.ws.connect();
+    // Connect to real-time services (using MQTT WebSocket bridge only)
+    // this.ws.connect(); // Disabled - duplicates MQTT connection
     this.mqtt.connect();
 
     // Subscribe to WebSocket telemetry
@@ -579,11 +579,13 @@ export class DataService implements OnDestroy {
     overall: boolean;
   } {
     const api = this.apiHealthy();
-    const websocket = this.wsConnected();
     const mqtt = this.mqttConnected();
     const database = this.dbHealthy();
     const mqttBroker = this.mqttBrokerHealthy();
     const coordinator = this.coordOnline();
+    
+    // WebSocket is now handled by MQTT service (WebSocket bridge)
+    const websocket = mqtt;
     
     return {
       api,
@@ -592,7 +594,7 @@ export class DataService implements OnDestroy {
       database,
       mqttBroker,
       coordinator,
-      overall: api && websocket && mqtt && database && mqttBroker
+      overall: api && mqtt && database && mqttBroker
     };
   }
 

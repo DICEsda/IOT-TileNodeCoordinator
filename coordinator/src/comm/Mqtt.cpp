@@ -627,16 +627,25 @@ void Mqtt::runReachabilityProbe() {
     Logger::info("Probing TCP reachability to %s:%u...", brokerHost.c_str(), brokerPort);
     WiFiClient probe;
     probe.setTimeout(1000);
+    
+    // Check WiFi status first (guard against null pointer)
+    if (wifiManager) {
+        WifiManager::Status status = wifiManager->getStatus();
+        if (!status.connected) {
+            Logger::error("Cannot probe: WiFi not connected");
+            return;
+        }
+    }
+    
     if (!probe.connect(brokerHost.c_str(), brokerPort)) {
         Logger::error("Unable to open TCP socket to %s:%u. Ensure docker-compose exposes Mosquitto on 0.0.0.0:%u and Windows firewall permits inbound connections.",
                       brokerHost.c_str(), brokerPort, brokerPort);
         if (wifiManager) {
             WifiManager::Status status = wifiManager->getStatus();
             String ip = status.ip.toString();
-            Logger::info("Wi-Fi context: %s (offline=%s) ip=%s", status.connected ? "connected" : "disconnected",
-                         status.offlineMode ? "true" : "false",
-                         ip.c_str());
+            Logger::info("Wi-Fi context: SSID=%s ip=%s", status.ssid.c_str(), ip.c_str());
         }
+        probe.stop();
         return;
     }
 

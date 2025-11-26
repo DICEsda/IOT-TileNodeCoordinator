@@ -200,8 +200,6 @@ void loop() { app.loop(); }
 #include "led/LedController.h"
 #include "input/ButtonInput.h"
 #include "config/PinConfig.h"
-// Temperature sensor
-#include "sensor/TMP177Sensor.h"
 
 // Node state machine
 enum class NodeState { PAIRING, OPERATIONAL, UPDATE, REBOOT };
@@ -220,7 +218,6 @@ private:
     // ESP-NOW
     uint8_t coordinatorMac[6];
     bool espNowInitialized;
-    int coordChannel = 1; // WiFi channel for ESP-NOW
     
     // RGBW LED strip
     LedController leds{4}; // PRD: 4 pixels per node
@@ -228,8 +225,7 @@ private:
     bool statusOverrideActive = false;
     uint32_t statusOverrideUntilMs = 0;
     
-    // Link/activity tracking
-    uint32_t lastLinkActivityMs = 0; // updated on any RX, or successful unicast TX
+    // Temperature removed; coordinator owns sensors and derating
     
     // Power management
     uint32_t lastRxWindow;
@@ -242,11 +238,6 @@ private:
     ButtonInput button;
     uint32_t pairingStartTime;
     bool inPairingMode;
-    uint32_t lastJoinSentMs;
-    
-    // Temperature sensor
-    TMP177Sensor tempSensor;
-    bool tempSensorAvailable;
     
     // Node info
     String nodeId;
@@ -279,7 +270,6 @@ public:
     void onDataRecv(const uint8_t* mac, const uint8_t* data, int len);
     void onDataSent(const uint8_t* mac, esp_now_send_status_t status);
 private:
-    void sendJoinRequestNow();
     bool sendMessage(const EspNowMessage& message, const uint8_t* destMac = nullptr);
     void processReceivedMessage(const String& json);
     bool ensureEncryptedPeer(const uint8_t mac[6], const String& lmkHex);
@@ -287,6 +277,8 @@ private:
     
     // LED control
     void applyColor(uint8_t r, uint8_t g, uint8_t b, uint8_t w, uint16_t fadeMs);
+    
+    // Temperature sensing removed
     
     // Power management
     void enterLightSleep();
@@ -309,10 +301,6 @@ private:
     String generateCmdId();
     String getMacAddress();
     void logMessage(const String& level, const String& message);
-
-    // Link helpers
-    bool isBroadcast(const uint8_t* mac) const;
-    bool isLinkAlive() const;
 };
 
 SmartTileNode::SmartTileNode() 
@@ -326,10 +314,8 @@ SmartTileNode::SmartTileNode()
     , telemetryInterval(30)
     , pairingStartTime(0)
     , inPairingMode(false)
-    , lastJoinSentMs(0)
     , firmwareVersion("c3-1.0.0")
-    , lastCommandTime(0)
-    , tempSensorAvailable(false) {
+    , lastCommandTime(0) {
 }
 
 SmartTileNode::~SmartTileNode() {
@@ -359,14 +345,6 @@ bool SmartTileNode::begin() {
     button.begin(Pins::BUTTON);
     button.onLongPress([this]() { this->startPairing(); }, 2000);
     
-    // Initialize temperature sensor
-    tempSensorAvailable = tempSensor.begin(Pins::I2C_SDA, Pins::I2C_SCL);
-    if (tempSensorAvailable) {
-        logMessage("INFO", "TMP177 temperature sensor initialized");
-    } else {
-        logMessage("WARN", "TMP177 sensor not available");
-    }
-    
     // Initialize ESP-NOW
     if (!initEspNow()) {
         logMessage("ERROR", "Failed to initialize ESP-NOW");
@@ -377,16 +355,12 @@ bool SmartTileNode::begin() {
     if (config.exists(ConfigKeys::NODE_ID) && config.exists(ConfigKeys::LIGHT_ID)) {
         currentState = NodeState::OPERATIONAL;
         leds.setStatus(LedController::StatusMode::Idle);
-        Serial.println("Node: OPERATIONAL (awaiting link)");
+        logMessage("INFO", "Starting in OPERATIONAL mode");
     } else {
-        // No configuration - automatically enter pairing mode
         currentState = NodeState::PAIRING;
-        startPairing();
-        Serial.println("Node: unpaired. Auto-entering pairing mode.");
+        leds.setStatus(LedController::StatusMode::Pairing);
+        logMessage("INFO", "Starting in PAIRING mode");
     }
-    
-    // Force periodic telemetry every 5 seconds per requirement
-    telemetryInterval = 5;
     
     return true;
 }
@@ -411,30 +385,6 @@ void SmartTileNode::loop() {
             break;
     }
     
-    // Auto-enter pairing if operational but link is dead for >30 seconds
-    if (currentState == NodeState::OPERATIONAL && !inPairingMode) {
-        static uint32_t linkLostTime = 0;
-        
-        if (!isLinkAlive()) {
-            if (linkLostTime == 0) {
-                linkLostTime = millis();
-            } else if (millis() - linkLostTime > 30000) { // 30 seconds without link
-                Serial.println("Link dead for 30s - auto-entering pairing mode");
-                currentState = NodeState::PAIRING;
-                startPairing();
-                linkLostTime = 0;
-            }
-        } else {
-            linkLostTime = 0; // Reset timer when link is alive
-        }
-    }
-    
-    // While operational and not overriding/pairing, reflect link health on LEDs
-    if (currentState == NodeState::OPERATIONAL && !inPairingMode && !statusOverrideActive) {
-        leds.setStatus(isLinkAlive() ? LedController::StatusMode::Connected
-                                     : LedController::StatusMode::Idle);
-    }
-
     // Send telemetry periodically
     if (millis() - lastTelemetry > telemetryInterval * 1000) {
         sendTelemetry();
@@ -453,38 +403,6 @@ void SmartTileNode::loop() {
     delay(animating ? 1 : 10);
 }
 
-void SmartTileNode::sendJoinRequestNow() {
-    JoinRequestMessage joinReq;
-    joinReq.mac = getMacAddress();
-    joinReq.fw = firmwareVersion;
-        joinReq.caps.rgbw = true;
-        joinReq.caps.led_count = leds.numPixels();
-        joinReq.caps.temp_i2c = false; // No sensor in standalone mode
-        joinReq.caps.deep_sleep = true;
-        joinReq.caps.button = true;
-    joinReq.token = String(esp_random(), HEX);
-
-    String payload = joinReq.toJson();
-    if (payload.length() > 250) {
-        logMessage("ERROR", "JOIN_REQUEST too large!");
-        return;
-    }
-    
-    // Quick green flash to indicate sending
-    leds.setStatus(LedController::StatusMode::None);
-    leds.setBrightness(120);
-    leds.setColor(0, 255, 0, 0); // Green
-    leds.update();
-    delay(50); // Brief flash
-    
-    // Always broadcast for pairing
-    uint8_t targetMac[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
-    esp_now_send(targetMac, (uint8_t*)payload.c_str(), payload.length());
-    
-    // Restore pairing animation
-    leds.setStatus(LedController::StatusMode::Pairing);
-}
-
 void SmartTileNode::handlePairing() {
     if (!inPairingMode) {
         // Wait for button press to start pairing
@@ -492,37 +410,20 @@ void SmartTileNode::handlePairing() {
     }
     
     // Check if pairing window expired
-    uint32_t now = millis();
-    if (now - pairingStartTime > (uint32_t)config.getInt(ConfigKeys::PAIRING_WINDOW_S, 120) * 1000U) {
+    if (millis() - pairingStartTime > config.getInt(ConfigKeys::PAIRING_WINDOW_S, 120) * 1000) {
         stopPairing();
         return;
     }
     
-    // Optimized adaptive join interval with exponential backoff
-    uint32_t elapsed = now - pairingStartTime;
-    uint32_t baseInterval;
-    
-    // Aggressive in first 5 seconds, then slower with exponential backoff
-    if (elapsed < 5000U) {
-        baseInterval = 600U;  // Very fast initially
-    } else if (elapsed < 15000U) {
-        baseInterval = 1200U; // Medium frequency
-    } else if (elapsed < 30000U) {
-        baseInterval = 3000U; // Slower
-    } else {
-        baseInterval = 6000U; // Very slow after 30s
-    }
-    
-    // Add jitter to avoid collision with other nodes
-    uint32_t jitter = (uint32_t)(esp_random() % 400U);
-    
-    if (now - lastJoinSentMs >= baseInterval + jitter) {
+    // Send join request periodically during pairing
+    static uint32_t lastJoinRequest = 0;
+    if (millis() - lastJoinRequest > 5000) { // Every 5 seconds
         JoinRequestMessage joinReq;
         joinReq.mac = getMacAddress();
         joinReq.fw = firmwareVersion;
         joinReq.caps.rgbw = true;
         joinReq.caps.led_count = leds.numPixels();
-        joinReq.caps.temp_i2c = tempSensorAvailable;
+        joinReq.caps.temp_i2c = false;
         joinReq.caps.deep_sleep = true;
         joinReq.caps.button = true;
         joinReq.token = String(esp_random(), HEX);
@@ -535,34 +436,13 @@ void SmartTileNode::handlePairing() {
             return;
         }
         
-        // Quick green flash to indicate sending
-        leds.setStatus(LedController::StatusMode::None);
-        leds.setBrightness(120);
-        leds.setColor(0, 255, 0, 0); // Green
-        leds.update();
-        delay(50); // Brief flash
+        // Send to broadcast MAC address using native ESP-NOW v2
+        uint8_t broadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+        esp_err_t result = esp_now_send(broadcastMac, (uint8_t*)payload.c_str(), payload.length());
         
-        // Always broadcast JOIN_REQUEST for maximum reliability
-        uint8_t targetMac[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
-        esp_err_t result = esp_now_send(targetMac, (uint8_t*)payload.c_str(), payload.length());
-        
-        // Only retry once on failure to avoid spam
-        if (result != ESP_OK) {
-            delay(10); // Small delay before retry
-            result = esp_now_send(targetMac, (uint8_t*)payload.c_str(), payload.length());
-        }
-        
-        // Restore pairing animation
-        leds.setStatus(LedController::StatusMode::Pairing);
-        
-        lastJoinSentMs = now;
-        
-        // Only log every 3rd attempt to reduce overhead
-        static uint8_t logCounter = 0;
-        if (++logCounter % 3 == 0) {
-            logMessage("DEBUG", String("JOIN_REQUEST sent (") + String(payload.length()) + 
-                       " bytes), attempts=" + String(logCounter));
-        }
+        lastJoinRequest = millis();
+        logMessage("DEBUG", String("Sent JOIN_REQUEST (") + String(payload.length()) + 
+                   " bytes), result=" + String((int)result));
     }
 }
 
@@ -595,18 +475,6 @@ bool SmartTileNode::initEspNow() {
     WiFi.setSleep(false);
     WiFi.disconnect();
     delay(100);
-
-    // Pre-set channel BEFORE esp_now_init for maximum compatibility
-    esp_wifi_set_promiscuous(true);
-    esp_wifi_set_channel(1, WIFI_SECOND_CHAN_NONE);
-    esp_wifi_set_promiscuous(false);
-
-    // Optionally set a conservative ESPNOW PHY rate (if available)
-    #ifdef CONFIG_IDF_TARGET_ESP32C3
-    #ifdef WIFI_PHY_RATE_1M_L
-    esp_wifi_config_espnow_rate(WIFI_IF_STA, WIFI_PHY_RATE_1M_L);
-    #endif
-    #endif
     
     if (WiFi.getMode() != WIFI_STA) {
         logMessage("ERROR", "WiFi mode is not STA!");
@@ -630,66 +498,32 @@ bool SmartTileNode::initEspNow() {
         return false;
     }
     logMessage("INFO", "  ESP-NOW v2.0 initialized");
-
-    // Set PMK to ensure interoperability (even with unencrypted peers)
-    static const uint8_t PMK[16] = {'S','M','A','R','T','T','I','L','E','_','P','M','K','_','0','1'};
-    esp_err_t pmkRes = esp_now_set_pmk(PMK);
-    if (pmkRes == ESP_OK) {
-        logMessage("INFO", "  PMK set");
-    } else {
-        logMessage("WARN", String("  PMK set failed: ") + String((int)pmkRes));
-    }
     
-    // Scan for WiFi networks to find the coordinator's router channel
-    logMessage("INFO", "[4/9] Scanning for WiFi networks to detect coordinator channel...");
-    coordChannel = 1; // Default to channel 1
-    
-    // Try to scan for a known SSID pattern (if you know your router's SSID)
-    // This helps the node match the channel the coordinator is using
-    int numNetworks = WiFi.scanNetworks();
-    if (numNetworks > 0) {
-        logMessage("INFO", String("  Found ") + String(numNetworks) + String(" WiFi networks"));
-        // Use the strongest network's channel as a good guess for coordinator channel
-        // (assuming coordinator connects to one of these networks)
-        int bestRSSI = -100;
-        for (int i = 0; i < numNetworks; i++) {
-            int rssi = WiFi.RSSI(i);
-            if (rssi > bestRSSI) {
-                bestRSSI = rssi;
-                coordChannel = WiFi.channel(i);
-            }
-        }
-        logMessage("INFO", String("  Using strongest network channel: ") + String(coordChannel));
-    } else {
-        logMessage("WARN", "  No networks found, using default channel 1");
-    }
-    WiFi.scanDelete();
-    
-    // Set WiFi channel to match coordinator
-    logMessage("INFO", String("[5/9] Setting WiFi channel to ") + String(coordChannel) + String("..."));
+    // Set WiFi channel to 1 (must match coordinator)
+    logMessage("INFO", "[4/9] Setting WiFi channel to 1...");
     esp_wifi_set_promiscuous(true);
-    esp_err_t chRes = esp_wifi_set_channel(coordChannel, WIFI_SECOND_CHAN_NONE);
+    esp_err_t chRes = esp_wifi_set_channel(1, WIFI_SECOND_CHAN_NONE);
     esp_wifi_set_promiscuous(false);
     
     uint8_t primary = 0; 
     wifi_second_chan_t second = WIFI_SECOND_CHAN_NONE;
     esp_wifi_get_channel(&primary, &second);
     
-    if (primary != coordChannel) {
-        logMessage("ERROR", String("Failed to set channel! Wanted: ") + String(coordChannel) + String(", Got: ") + String((int)primary));
+    if (primary != 1) {
+        logMessage("ERROR", String("Failed to set channel! Now on: ") + String((int)primary));
         return false;
     }
     logMessage("INFO", String("  Channel: ") + String((int)primary));
     
     // Set WiFi protocol for compatibility
-    logMessage("INFO", "[6/9] Setting WiFi protocol...");
+    logMessage("INFO", "[5/9] Setting WiFi protocol...");
     esp_err_t protocolRes = esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
     if (protocolRes == ESP_OK) {
         logMessage("INFO", "  WiFi protocol set (802.11b/g/n)");
     }
     
     // ✓ Checklist: Callbacks - Register v2 callbacks
-    logMessage("INFO", "[7/9] Registering ESP-NOW v2 callbacks...");
+    logMessage("INFO", "[6/9] Registering ESP-NOW v2 callbacks...");
     gNodeInstance = this;
     
     esp_err_t recvResult = esp_now_register_recv_cb(espnowRecv);
@@ -712,7 +546,7 @@ bool SmartTileNode::initEspNow() {
     
     esp_now_peer_info_t peerInfo = {};
     memcpy(peerInfo.peer_addr, bcast, 6);
-    peerInfo.channel = coordChannel;
+    peerInfo.channel = 1;
     peerInfo.encrypt = false;
     peerInfo.ifidx = WIFI_IF_STA;
     
@@ -734,153 +568,45 @@ bool SmartTileNode::initEspNow() {
 }
 
 void SmartTileNode::onDataRecv(const uint8_t* mac, const uint8_t* data, int len) {
-    // Quick filter: drop obviously non-JSON frames or invalid data
-    if (!data || len <= 0 || len > 250) return;
-    if (((const char*)data)[0] != '{') {
-        return; // not our JSON protocol
-    }
-
+    // Log every received message for debugging
     char macStr[18];
     snprintf(macStr, sizeof(macStr), "%02X:%02X:%02X:%02X:%02X:%02X",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-
-    // Debug: log received length and first few chars
-    Serial.printf("RX %d bytes from %s: ", len, macStr);
-    // Show first 40 chars to identify message type
-    for (int i = 0; i < len && i < 40; i++) {
-        Serial.print((char)data[i]);
-    }
-    if (len > 40) Serial.print("...");
-    Serial.println();
+    logMessage("DEBUG", String("RX ") + String(len) + "B from " + String(macStr));
     
-    // Create String from data, stopping at first null byte or end of valid JSON
-    // Find actual end of JSON (last '}' character)
-    int actualLen = len;
-    for (int i = len - 1; i >= 0; i--) {
-        if (data[i] == '}') {
-            actualLen = i + 1;
-            break;
-        }
-        // Also stop if we find non-whitespace, non-null characters after '}'  
-        if (data[i] != 0 && data[i] != ' ' && data[i] != '\r' && data[i] != '\n' && data[i] != '\t') {
-            break;
-        }
-    }
+    String message = String((char*)data, len);
+    logMessage("DEBUG", String("RX data: ") + message);
     
-    String message;
-    message.reserve(actualLen + 1);
-    for (int i = 0; i < actualLen; i++) {
-        message += (char)data[i];
-    }
-
-    // Fast path: check for pairing ping first (avoid full string construction)
-    // BUT: don't return early if it's a join_accept (critical message)
-    if (inPairingMode && message.indexOf("pairing_ping") >= 0) {
-        uint32_t now = millis();
-        // Rate limit responses to avoid flooding
-        if (now - lastJoinSentMs > 600U) {
-            Serial.println("RX pairing beacon -> responding");
-            sendJoinRequestNow();
-            lastJoinSentMs = now;
-        }
-        return; // don't process further
-    }
-    
-    // Check if this is a join_accept - always process these
-    bool isJoinAccept = (message.indexOf("join_accept") >= 0);
-
-    // Optimize: check coordinator MAC filtering with early exit
-    bool coordKnown = false;
-    for (int i = 0; i < 6; i++) {
-        if (coordinatorMac[i] != 0) {
-            coordKnown = true;
-            break;
-        }
-    }
-    
-    if (coordKnown) {
-        bool fromCoordinator = true;
-        for (int i = 0; i < 6; i++) {
-            if (coordinatorMac[i] != mac[i]) {
-                fromCoordinator = false;
-                break;
-            }
-        }
-        
-        // Drop non-coordinator traffic unless it's a join_accept
-        if (!fromCoordinator && !isJoinAccept) {
-            return;
-        }
-    }
-    
-    // Remember coordinator MAC upon join_accept
-    if (isJoinAccept) {
+    // remember coordinator mac if unknown
+    if (mac && (coordinatorMac[0] == 0 && coordinatorMac[1] == 0 && coordinatorMac[2] == 0 && coordinatorMac[3] == 0 && coordinatorMac[4] == 0 && coordinatorMac[5] == 0)) {
         memcpy(coordinatorMac, mac, 6);
-        Serial.printf("Coordinator MAC: %s\n", macStr);
-        Serial.printf("RX JOIN_ACCEPT from coordinator\n");
+        logMessage("INFO", String("Learned coordinator MAC: ") + String(macStr));
     }
-
-    // mark RX window and link activity (only for real messages, not pings)
+    // mark RX window
     lastRxWindow = millis();
-    lastLinkActivityMs = lastRxWindow;
-
     processReceivedMessage(message);
 }
 
 void SmartTileNode::onDataSent(const uint8_t* mac, esp_now_send_status_t status) {
     if (status == ESP_NOW_SEND_SUCCESS) {
-        // Consider link alive only for unicast (non-broadcast) sends
-        if (mac && !isBroadcast(mac)) {
-            lastLinkActivityMs = millis();
-        }
-    }
-    // After a send completes, if not in pairing/override, reflect link health
-    if (currentState == NodeState::OPERATIONAL && !inPairingMode && !statusOverrideActive) {
-        leds.setStatus(isLinkAlive() ? LedController::StatusMode::Connected
-                                     : LedController::StatusMode::Idle);
+        logMessage("DEBUG", "Message sent successfully");
+    } else {
+        logMessage("WARN", "Message send failed");
     }
 }
 
 void SmartTileNode::processReceivedMessage(const String& json) {
-    // Fast check: ignore common non-processing messages
-    const char* jstr = json.c_str();
-    if (strstr(jstr, "pairing_ping") || strstr(jstr, "\"ping\"") || strstr(jstr, "coordinator_alive")) {
-        return;
-    }
-    
-    // Debug: log what we're processing (full message)
-    Serial.printf("Processing message (%d chars): %s\n", json.length(), json.c_str());
-    
     EspNowMessage* message = MessageFactory::createMessage(json);
     if (!message) {
-        Serial.println("ERROR: Failed to parse message!");
-        Serial.printf("  Message was: %s\n", json.c_str());
-        Serial.printf("  Length: %d bytes\n", json.length());
+        logMessage("ERROR", "Failed to parse message");
         return;
     }
-    
-    Serial.printf("Message type: %d\n", (int)message->type);
     
     switch (message->type) {
         case MessageType::JOIN_ACCEPT: {
             JoinAcceptMessage* accept = static_cast<JoinAcceptMessage*>(message);
             nodeId = accept->node_id;
             lightId = accept->light_id;
-            
-            // Switch to coordinator's WiFi channel
-            if (accept->wifi_channel > 0 && accept->wifi_channel != coordChannel) {
-                Serial.printf("Switching to coordinator's WiFi channel: %d\n", accept->wifi_channel);
-                coordChannel = accept->wifi_channel;
-                esp_wifi_set_promiscuous(true);
-                esp_wifi_set_channel(coordChannel, WIFI_SECOND_CHAN_NONE);
-                esp_wifi_set_promiscuous(false);
-                
-                // Verify channel change
-                uint8_t actualChannel = 0;
-                wifi_second_chan_t second = WIFI_SECOND_CHAN_NONE;
-                esp_wifi_get_channel(&actualChannel, &second);
-                Serial.printf("Channel now: %d\n", actualChannel);
-            }
             
             config.setString(ConfigKeys::NODE_ID, nodeId);
             config.setString(ConfigKeys::LIGHT_ID, lightId);
@@ -895,23 +621,13 @@ void SmartTileNode::processReceivedMessage(const String& json) {
             
             saveConfiguration();
             
-            // Send status and switch to connected operational mode
+            // Send status and switch to operational
+            sendTelemetry();
             currentState = NodeState::OPERATIONAL;
             stopPairing();
-            // Brief green flash to confirm pairing success (full brightness)
-            leds.setStatus(LedController::StatusMode::None);
-            leds.setBrightness(255);
-            leds.setColor(0, 255, 0, 0);
-            delay(120);
-            // Resume Connected animation (solid green)
-            leds.setStatus(LedController::StatusMode::Connected);
+            leds.setStatus(LedController::StatusMode::Idle);
             
-            // Immediately send telemetry after pairing
-            lastTelemetry = millis(); // Reset timer
-            sendTelemetry();
-            
-            Serial.println("Paired successfully!");
-            Serial.printf("Node ID: %s, Light ID: %s\n", nodeId.c_str(), lightId.c_str());
+            logMessage("INFO", "Successfully paired with coordinator");
             break;
         }
         case MessageType::SET_LIGHT: {
@@ -938,6 +654,7 @@ void SmartTileNode::processReceivedMessage(const String& json) {
                 ack.cmd_id = setLight->cmd_id;
                 sendMessage(ack);
                 
+                logMessage("INFO", "Received set_light command");
             }
             break;
         }
@@ -971,24 +688,13 @@ bool SmartTileNode::isRxWindowActive() {
     return (millis() - lastRxWindow) < rxWindowMs;
 }
 
-bool SmartTileNode::isBroadcast(const uint8_t* mac) const {
-    if (!mac) return true;
-    for (int i = 0; i < 6; ++i) if (mac[i] != 0xFF) return false;
-    return true;
-}
-
-bool SmartTileNode::isLinkAlive() const {
-    if (lastLinkActivityMs == 0) return false;
-    return (millis() - lastLinkActivityMs) < 10000U; // 10s window
-}
-
 void SmartTileNode::handleButton() {
     button.loop();
     // Clear status override when TTL expires
     if (statusOverrideActive && millis() > statusOverrideUntilMs) {
         statusOverrideActive = false;
         leds.setStatus(currentState == NodeState::PAIRING ? LedController::StatusMode::Pairing
-                                                          : LedController::StatusMode::Connected);
+                                                          : LedController::StatusMode::Idle);
     }
 }
 
@@ -996,25 +702,16 @@ void SmartTileNode::startPairing() {
     inPairingMode = true;
     pairingStartTime = millis();
     leds.setStatus(LedController::StatusMode::Pairing);
-    Serial.println("Pairing mode: active");
+    logMessage("INFO", "Pairing mode started");
 }
 
 void SmartTileNode::stopPairing() {
     inPairingMode = false;
-    leds.setStatus(currentState == NodeState::OPERATIONAL ? LedController::StatusMode::Connected
-                                                          : LedController::StatusMode::Idle);
-    Serial.println("Pairing mode: stopped");
+    leds.setStatus(LedController::StatusMode::Idle);
+    logMessage("INFO", "Pairing mode stopped");
 }
 
 void SmartTileNode::sendTelemetry() {
-    // Skip telemetry if not paired yet
-    if (nodeId.length() == 0 || lightId.length() == 0) {
-        Serial.println("Telemetry: skipped (not paired)");
-        return;
-    }
-    
-    Serial.printf("Sending telemetry to coordinator (nodeId=%s)\n", nodeId.c_str());
-    
     NodeStatusMessage status;
     status.node_id = nodeId;
     status.light_id = lightId;
@@ -1024,22 +721,7 @@ void SmartTileNode::sendTelemetry() {
     status.fw = firmwareVersion;
     status.vbat_mv = readBatteryVoltage();
     
-    // Read temperature sensor
-    if (tempSensorAvailable) {
-        status.temperature = tempSensor.readTemperature();
-        Serial.printf("  Temperature: %.2f°C\n", status.temperature);
-    }
-    
-    // Read button state (from ButtonInput class - check if pressed)
-    status.button_pressed = digitalRead(Pins::BUTTON) == LOW; // Assuming active-low button
-    Serial.printf("  Button: %s\n", status.button_pressed ? "PRESSED" : "Released");
-    Serial.printf("  RGBW: (%d,%d,%d,%d)\n", curR, curG, curB, curW);
-    Serial.printf("  Battery: %d mV\n", status.vbat_mv);
-    
-    // Don't flash LED during telemetry - keep it solid green
-    // Just send the message
-    bool sent = sendMessage(status);
-    Serial.printf("Telemetry send: %s\n", sent ? "OK" : "FAILED");
+    sendMessage(status);
 }
 
 uint16_t SmartTileNode::readBatteryVoltage() {
@@ -1114,7 +796,7 @@ bool SmartTileNode::ensureEncryptedPeer(const uint8_t mac[6], const String& /*lm
     // Add as unencrypted peer
     esp_now_peer_info_t peerInfo = {};
     memcpy(peerInfo.peer_addr, mac, 6);
-    peerInfo.channel = coordChannel;
+    peerInfo.channel = 1;
     peerInfo.encrypt = false;
     peerInfo.ifidx = WIFI_IF_STA;
     
@@ -1153,7 +835,8 @@ bool SmartTileNode::parseHex16(const String& hex, uint8_t out[16]) {
 }
 
 void SmartTileNode::logMessage(const String& level, const String& message) {
-    Serial.printf("[%s] %s\n", level.c_str(), message.c_str());
+    uint32_t timestamp = millis();
+    Serial.printf("[%lu] [%s] %s\n", timestamp, level.c_str(), message.c_str());
 }
 
 // Global instance

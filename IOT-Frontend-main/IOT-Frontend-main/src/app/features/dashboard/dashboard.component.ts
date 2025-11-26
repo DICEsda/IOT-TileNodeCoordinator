@@ -3,9 +3,9 @@ import { Component, OnDestroy, OnInit, signal, inject, computed } from '@angular
 import { DataService } from '../../core/services/data.service';
 import { LightMonitorComponent } from './components/light-monitor/light-monitor.component';
 import { RoomVisualizerComponent } from './components/room-visualizer/room-visualizer.component';
-import { CalibrateComponent } from './tabs/calibrate/calibrate.component';
+
 import { DevicesComponent } from './tabs/devices/devices.component';
-import { LogsComponent } from './tabs/logs/logs.component';
+
 import { SettingsNewComponent } from './tabs/settings/settings-new.component';
 import { CustomizeComponent } from './tabs/customize.component';
 import { Node } from '../../core/models/api.models';
@@ -25,11 +25,9 @@ interface LightNodeState {
     RoomVisualizerComponent,
     LightMonitorComponent,
     NetworkGraphComponent,
-    LogsComponent,
     DevicesComponent,
     SettingsNewComponent,
-    CustomizeComponent,
-    CalibrateComponent
+    CustomizeComponent
   ],
   templateUrl: './dashboard.component.html',
   styleUrl: './dashboard.component.scss'

@@ -1,0 +1,884 @@
+<div class="customize-container">
+  <!-- Header -->
+  <div class="customize-header">
+    <h2>Device Configuration</h2>
+    <p class="subtitle">Configure operational parameters stored in NVS</p>
+  </div>
+
+  <!-- Device Selector -->
+  <div class="device-selector">
+    <div class="selector-group">
+      <label>Select Device:</label>
+      <div class="device-tabs">
+        <button 
+          class="device-tab"
+          [class.active]="selectedDeviceType() === 'coordinator'"
+          (click)="selectedDeviceType.set('coordinator')">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2l9 4.9V12c0 5.25-3.6 10.17-9 11.4-5.4-1.23-9-6.15-9-11.4V6.9L12 2z"/>
+          </svg>
+          Coordinators
+        </button>
+        <button 
+          class="device-tab"
+          [class.active]="selectedDeviceType() === 'node'"
+          (click)="selectedDeviceType.set('node')">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <circle cx="12" cy="12" r="4"/>
+          </svg>
+          Nodes
+        </button>
+      </div>
+    </div>
+
+    <!-- Coordinator List -->
+    @if (selectedDeviceType() === 'coordinator') {
+      <div class="device-list">
+        @for (coord of coordinators(); track coord.coord_id) {
+          <button 
+            class="device-item"
+            [class.active]="selectedDeviceId() === coord.coord_id"
+            [class.online]="coord.status === 'online'"
+            (click)="selectDevice('coordinator', coord.coord_id)">
+            <div class="device-info">
+              <span class="device-name">{{ coord.coord_id }}</span>
+              <span class="device-status">{{ coord.status }}</span>
+            </div>
+            <div class="device-meta">
+              <span class="device-mac">{{ coord.mac_address }}</span>
+              @if (coord.wifi_rssi) {
+                <span class="device-signal">{{ coord.wifi_rssi }} dBm</span>
+              }
+            </div>
+          </button>
+        } @empty {
+          <p class="empty-state">No coordinators available</p>
+        }
+      </div>
+    }
+
+    <!-- Node List -->
+    @if (selectedDeviceType() === 'node') {
+      <div class="device-list">
+        @for (node of nodes(); track node.node_id) {
+          <button 
+            class="device-item"
+            [class.active]="selectedDeviceId() === node.node_id"
+            [class.online]="node.status === 'online'"
+            (click)="selectDevice('node', node.node_id)">
+            <div class="device-info">
+              <span class="device-name">{{ node.name || node.node_id }}</span>
+              <span class="device-status">{{ node.status }}</span>
+            </div>
+            <div class="device-meta">
+              <span class="device-mac">{{ node.mac_address }}</span>
+              @if (node.battery_percent) {
+                <span class="device-battery">🔋 {{ node.battery_percent }}%</span>
+              }
+            </div>
+          </button>
+        } @empty {
+          <p class="empty-state">No nodes available</p>
+        }
+      </div>
+    }
+  </div>
+
+  @if (selectedDevice()) {
+    <!-- Configuration Sections Tabs -->
+    <div class="section-tabs">
+      <button 
+        class="section-tab"
+        [class.active]="activeSection() === 'radar'"
+        (click)="setActiveSection('radar')">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"/>
+          <circle cx="12" cy="12" r="6"/>
+          <circle cx="12" cy="12" r="2"/>
+        </svg>
+        mmWave Radar
+      </button>
+      <button 
+        class="section-tab"
+        [class.active]="activeSection() === 'light'"
+        (click)="setActiveSection('light')">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="5"/>
+          <line x1="12" y1="1" x2="12" y2="3"/>
+          <line x1="12" y1="21" x2="12" y2="23"/>
+          <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+          <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+          <line x1="1" y1="12" x2="3" y2="12"/>
+          <line x1="21" y1="12" x2="23" y2="12"/>
+          <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+          <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+        </svg>
+        Light Sensor
+      </button>
+      <button 
+        class="section-tab"
+        [class.active]="activeSection() === 'led'"
+        (click)="setActiveSection('led')">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>
+          <circle cx="12" cy="12" r="5"/>
+        </svg>
+        LED Strips
+      </button>
+    </div>
+
+    <!-- Configuration Content -->
+    <div class="config-content">
+      <!-- Radar Configuration -->
+      @if (activeSection() === 'radar') {
+        <div class="config-section">
+          <div class="section-header">
+            <h3>HLK-LD2450 mmWave Radar Configuration</h3>
+            <p class="section-desc">Configure detection parameters for the 24GHz mmWave presence sensor</p>
+          </div>
+
+          <div class="config-grid">
+            <!-- Enable/Disable -->
+            <div class="config-item full-width">
+              <label class="toggle-label">
+                <input 
+                  type="checkbox" 
+                  [checked]="radarEnabled()"
+                  (change)="radarEnabled.set(!radarEnabled())">
+                <span>Enable Radar Sensor</span>
+              </label>
+            </div>
+
+            <!-- Operating Mode -->
+            <div class="config-item">
+              <label>Operating Mode</label>
+              <select 
+                [value]="radarMode()"
+                (change)="radarMode.set($any($event.target).value)"
+                [disabled]="!radarEnabled()">
+                <option value="standard">Standard</option>
+                <option value="energy-saving">Energy Saving</option>
+                <option value="multi-target">Multi-Target</option>
+              </select>
+              <small>Standard: balanced, Energy Saving: lower power, Multi-Target: detect multiple people</small>
+            </div>
+
+            <!-- Detection Range -->
+            <div class="config-item">
+              <label>Max Detection Distance: {{ radarMaxDistance() }} cm</label>
+              <input 
+                type="range" 
+                min="100" 
+                max="600" 
+                step="10"
+                [value]="radarMaxDistance()"
+                (input)="radarMaxDistance.set(+$any($event.target).value)"
+                [disabled]="!radarEnabled()">
+              <small>Range: 100-600 cm (HLK-LD2450 specification)</small>
+            </div>
+
+            <!-- Min Distance -->
+            <div class="config-item">
+              <label>Min Detection Distance: {{ radarMinDistance() }} cm</label>
+              <input 
+                type="range" 
+                min="0" 
+                max="100" 
+                step="5"
+                [value]="radarMinDistance()"
+                (input)="radarMinDistance.set(+$any($event.target).value)"
+                [disabled]="!radarEnabled()">
+              <small>Ignore detections closer than this distance</small>
+            </div>
+
+            <!-- Field of View -->
+            <div class="config-item">
+              <label>Field of View: {{ radarFieldOfView() }}°</label>
+              <input 
+                type="range" 
+                min="60" 
+                max="150" 
+                step="5"
+                [value]="radarFieldOfView()"
+                (input)="radarFieldOfView.set(+$any($event.target).value)"
+                [disabled]="!radarEnabled()">
+              <small>Horizontal detection angle (60-150°)</small>
+            </div>
+
+            <!-- Sensitivity -->
+            <div class="config-item">
+              <label>Sensitivity: {{ radarSensitivity() }}%</label>
+              <input 
+                type="range" 
+                min="0" 
+                max="100" 
+                step="5"
+                [value]="radarSensitivity()"
+                (input)="radarSensitivity.set(+$any($event.target).value)"
+                [disabled]="!radarEnabled()">
+              <small>Higher values detect smaller movements</small>
+            </div>
+
+            <!-- Report Rate -->
+            <div class="config-item">
+              <label>Report Rate: {{ radarReportRate() }} Hz</label>
+              <input 
+                type="range" 
+                min="1" 
+                max="20" 
+                step="1"
+                [value]="radarReportRate()"
+                (input)="radarReportRate.set(+$any($event.target).value)"
+                [disabled]="!radarEnabled()">
+              <small>Data update frequency (1-20 Hz)</small>
+            </div>
+
+            <!-- Detection Filters -->
+            <div class="config-item full-width">
+              <label>Detection Filters</label>
+              <div class="checkbox-group">
+                <label class="checkbox-label">
+                  <input 
+                    type="checkbox" 
+                    [checked]="radarFilterEnabled()"
+                    (change)="radarFilterEnabled.set(!radarFilterEnabled())"
+                    [disabled]="!radarEnabled()">
+                  <span>Enable Noise Filter</span>
+                </label>
+                <label class="checkbox-label">
+                  <input 
+                    type="checkbox" 
+                    [checked]="radarStaticDetection()"
+                    (change)="radarStaticDetection.set(!radarStaticDetection())"
+                    [disabled]="!radarEnabled()">
+                  <span>Detect Static Presence</span>
+                </label>
+                <label class="checkbox-label">
+                  <input 
+                    type="checkbox" 
+                    [checked]="radarMovingDetection()"
+                    (change)="radarMovingDetection.set(!radarMovingDetection())"
+                    [disabled]="!radarEnabled()">
+                  <span>Detect Moving Targets</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Detection Zones -->
+            <div class="config-item full-width">
+              <h4>Detection Zones</h4>
+              <p class="zone-desc">Define up to 3 detection zones with custom boundaries</p>
+              
+              <!-- Zone 1 -->
+              <div class="zone-config">
+                <label class="toggle-label">
+                  <input 
+                    type="checkbox" 
+                    [checked]="radarZone1Enabled()"
+                    (change)="radarZone1Enabled.set(!radarZone1Enabled())"
+                    [disabled]="!radarEnabled()">
+                  <span>Zone 1</span>
+                </label>
+                @if (radarZone1Enabled()) {
+                  <div class="zone-bounds">
+                    <div class="bound-input">
+                      <label>Min X (mm)</label>
+                      <input 
+                        type="number" 
+                        [value]="radarZone1MinX()"
+                        (input)="radarZone1MinX.set(+$any($event.target).value)">
+                    </div>
+                    <div class="bound-input">
+                      <label>Max X (mm)</label>
+                      <input 
+                        type="number" 
+                        [value]="radarZone1MaxX()"
+                        (input)="radarZone1MaxX.set(+$any($event.target).value)">
+                    </div>
+                    <div class="bound-input">
+                      <label>Min Y (mm)</label>
+                      <input 
+                        type="number" 
+                        [value]="radarZone1MinY()"
+                        (input)="radarZone1MinY.set(+$any($event.target).value)">
+                    </div>
+                    <div class="bound-input">
+                      <label>Max Y (mm)</label>
+                      <input 
+                        type="number" 
+                        [value]="radarZone1MaxY()"
+                        (input)="radarZone1MaxY.set(+$any($event.target).value)">
+                    </div>
+                  </div>
+                }
+              </div>
+
+              <!-- Zone 2 -->
+              <div class="zone-config">
+                <label class="toggle-label">
+                  <input 
+                    type="checkbox" 
+                    [checked]="radarZone2Enabled()"
+                    (change)="radarZone2Enabled.set(!radarZone2Enabled())"
+                    [disabled]="!radarEnabled()">
+                  <span>Zone 2</span>
+                </label>
+                @if (radarZone2Enabled()) {
+                  <div class="zone-bounds">
+                    <div class="bound-input">
+                      <label>Min X (mm)</label>
+                      <input 
+                        type="number" 
+                        [value]="radarZone2MinX()"
+                        (input)="radarZone2MinX.set(+$any($event.target).value)">
+                    </div>
+                    <div class="bound-input">
+                      <label>Max X (mm)</label>
+                      <input 
+                        type="number" 
+                        [value]="radarZone2MaxX()"
+                        (input)="radarZone2MaxX.set(+$any($event.target).value)">
+                    </div>
+                    <div class="bound-input">
+                      <label>Min Y (mm)</label>
+                      <input 
+                        type="number" 
+                        [value]="radarZone2MinY()"
+                        (input)="radarZone2MinY.set(+$any($event.target).value)">
+                    </div>
+                    <div class="bound-input">
+                      <label>Max Y (mm)</label>
+                      <input 
+                        type="number" 
+                        [value]="radarZone2MaxY()"
+                        (input)="radarZone2MaxY.set(+$any($event.target).value)">
+                    </div>
+                  </div>
+                }
+              </div>
+
+              <!-- Zone 3 -->
+              <div class="zone-config">
+                <label class="toggle-label">
+                  <input 
+                    type="checkbox" 
+                    [checked]="radarZone3Enabled()"
+                    (change)="radarZone3Enabled.set(!radarZone3Enabled())"
+                    [disabled]="!radarEnabled()">
+                  <span>Zone 3</span>
+                </label>
+                @if (radarZone3Enabled()) {
+                  <div class="zone-bounds">
+                    <div class="bound-input">
+                      <label>Min X (mm)</label>
+                      <input 
+                        type="number" 
+                        [value]="radarZone3MinX()"
+                        (input)="radarZone3MinX.set(+$any($event.target).value)">
+                    </div>
+                    <div class="bound-input">
+                      <label>Max X (mm)</label>
+                      <input 
+                        type="number" 
+                        [value]="radarZone3MaxX()"
+                        (input)="radarZone3MaxX.set(+$any($event.target).value)">
+                    </div>
+                    <div class="bound-input">
+                      <label>Min Y (mm)</label>
+                      <input 
+                        type="number" 
+                        [value]="radarZone3MinY()"
+                        (input)="radarZone3MinY.set(+$any($event.target).value)">
+                    </div>
+                    <div class="bound-input">
+                      <label>Max Y (mm)</label>
+                      <input 
+                        type="number" 
+                        [value]="radarZone3MaxY()"
+                        (input)="radarZone3MaxY.set(+$any($event.target).value)">
+                    </div>
+                  </div>
+                }
+              </div>
+            </div>
+          </div>
+
+          <div class="config-actions">
+            <button class="btn btn-primary" (click)="saveRadarConfig()" [disabled]="saving()">
+              @if (saving()) {
+                <span class="spinner"></span> Saving...
+              } @else {
+                Save Radar Config
+              }
+            </button>
+            <button class="btn btn-secondary" (click)="resetToDefaults()">
+              Reset to Defaults
+            </button>
+          </div>
+        </div>
+      }
+
+      <!-- Light Sensor Configuration -->
+      @if (activeSection() === 'light') {
+        <div class="config-section">
+          <div class="section-header">
+            <h3>TSL2561 Light Sensor Configuration</h3>
+            <p class="section-desc">Configure ambient light sensor parameters and thresholds</p>
+          </div>
+
+          <div class="config-grid">
+            <!-- Enable/Disable -->
+            <div class="config-item full-width">
+              <label class="toggle-label">
+                <input 
+                  type="checkbox" 
+                  [checked]="lightSensorEnabled()"
+                  (change)="lightSensorEnabled.set(!lightSensorEnabled())">
+                <span>Enable Light Sensor</span>
+              </label>
+            </div>
+
+            <!-- Integration Time -->
+            <div class="config-item">
+              <label>Integration Time</label>
+              <select 
+                [value]="lightIntegrationTime()"
+                (change)="setLightIntegrationTime(+$any($event.target).value)"
+                [disabled]="!lightSensorEnabled()">
+                <option [value]="13">13 ms (Fast)</option>
+                <option [value]="101">101 ms (Medium)</option>
+                <option [value]="402">402 ms (Slow, High Precision)</option>
+              </select>
+              <small>Longer integration provides better accuracy in low light</small>
+            </div>
+
+            <!-- Gain -->
+            <div class="config-item">
+              <label>Gain</label>
+              <select 
+                [value]="lightGain()"
+                (change)="setLightGain(+$any($event.target).value)"
+                [disabled]="!lightSensorEnabled()">
+                <option [value]="1">1x (Bright environments)</option>
+                <option [value]="16">16x (Low light)</option>
+              </select>
+              <small>16x gain amplifies signal in dim conditions</small>
+            </div>
+
+            <!-- Auto Range -->
+            <div class="config-item full-width">
+              <label class="toggle-label">
+                <input 
+                  type="checkbox" 
+                  [checked]="lightAutoRange()"
+                  (change)="lightAutoRange.set(!lightAutoRange())"
+                  [disabled]="!lightSensorEnabled()">
+                <span>Auto Range (Automatically adjust gain)</span>
+              </label>
+            </div>
+
+            <!-- Thresholds -->
+            <div class="config-item">
+              <label>Low Threshold: {{ lightLowThreshold() }} lux</label>
+              <input 
+                type="range" 
+                min="0" 
+                max="500" 
+                step="10"
+                [value]="lightLowThreshold()"
+                (input)="lightLowThreshold.set(+$any($event.target).value)"
+                [disabled]="!lightSensorEnabled()">
+              <small>Trigger action when light falls below this level</small>
+            </div>
+
+            <div class="config-item">
+              <label>High Threshold: {{ lightHighThreshold() }} lux</label>
+              <input 
+                type="range" 
+                min="500" 
+                max="10000" 
+                step="100"
+                [value]="lightHighThreshold()"
+                (input)="lightHighThreshold.set(+$any($event.target).value)"
+                [disabled]="!lightSensorEnabled()">
+              <small>Trigger action when light exceeds this level</small>
+            </div>
+
+            <!-- Sampling Interval -->
+            <div class="config-item">
+              <label>Sampling Interval: {{ lightSamplingInterval() }} ms</label>
+              <input 
+                type="range" 
+                min="100" 
+                max="10000" 
+                step="100"
+                [value]="lightSamplingInterval()"
+                (input)="lightSamplingInterval.set(+$any($event.target).value)"
+                [disabled]="!lightSensorEnabled()">
+              <small>How often to read the sensor</small>
+            </div>
+
+            <!-- Calibration Factor -->
+            <div class="config-item">
+              <label>Calibration Factor: {{ lightCalibrationFactor() }}</label>
+              <input 
+                type="range" 
+                min="0.5" 
+                max="2.0" 
+                step="0.05"
+                [value]="lightCalibrationFactor()"
+                (input)="lightCalibrationFactor.set(+$any($event.target).value)"
+                [disabled]="!lightSensorEnabled()">
+              <small>Adjust for sensor placement and environment</small>
+            </div>
+
+            <!-- Package Type -->
+            <div class="config-item">
+              <label>Package Type</label>
+              <select 
+                [value]="lightPackageType()"
+                (change)="lightPackageType.set($any($event.target).value)"
+                [disabled]="!lightSensorEnabled()">
+                <option value="CS">CS Package</option>
+                <option value="T-FN-CL">T-FN-CL Package</option>
+              </select>
+              <small>TSL2561 package type affects calibration</small>
+            </div>
+          </div>
+
+          <div class="config-actions">
+            <button class="btn btn-primary" (click)="saveLightConfig()" [disabled]="saving()">
+              @if (saving()) {
+                <span class="spinner"></span> Saving...
+              } @else {
+                Save Light Sensor Config
+              }
+            </button>
+            <button class="btn btn-secondary" (click)="resetToDefaults()">
+              Reset to Defaults
+            </button>
+          </div>
+        </div>
+      }
+
+      <!-- LED Configuration -->
+      @if (activeSection() === 'led') {
+        <div class="config-section">
+          <div class="section-header">
+            <h3>SK6812B LED Strip Configuration</h3>
+            <p class="section-desc">Configure addressable RGB LED strip parameters and effects</p>
+          </div>
+
+          <div class="config-grid">
+            <!-- Enable/Disable -->
+            <div class="config-item full-width">
+              <label class="toggle-label">
+                <input 
+                  type="checkbox" 
+                  [checked]="ledEnabled()"
+                  (change)="ledEnabled.set(!ledEnabled())">
+                <span>Enable LED Strip</span>
+              </label>
+            </div>
+
+            <!-- LED Count -->
+            <div class="config-item">
+              <label>LED Count: {{ ledCount() }}</label>
+              <input 
+                type="number" 
+                min="1" 
+                max="300"
+                [value]="ledCount()"
+                (input)="ledCount.set(+$any($event.target).value)"
+                [disabled]="!ledEnabled()">
+              <small>Total number of LEDs in the strip</small>
+            </div>
+
+            <!-- Brightness -->
+            <div class="config-item">
+              <label>Brightness: {{ ledBrightness() }}%</label>
+              <input 
+                type="range" 
+                min="0" 
+                max="100" 
+                step="1"
+                [value]="ledBrightness()"
+                (input)="ledBrightness.set(+$any($event.target).value)"
+                [disabled]="!ledEnabled()">
+              <small>Overall brightness level</small>
+            </div>
+
+            <!-- Color -->
+            <div class="config-item">
+              <label>Default Color</label>
+              <input 
+                type="color" 
+                [value]="ledColor()"
+                (input)="ledColor.set($any($event.target).value)"
+                [disabled]="!ledEnabled()">
+              <input 
+                type="text" 
+                [value]="ledColor()"
+                (input)="ledColor.set($any($event.target).value)"
+                placeholder="#00FFBF"
+                [disabled]="!ledEnabled()">
+            </div>
+
+            <!-- Effect -->
+            <div class="config-item">
+              <label>Effect</label>
+              <select 
+                [value]="ledEffect()"
+                (change)="ledEffect.set($any($event.target).value)"
+                [disabled]="!ledEnabled()">
+                <option value="solid">Solid Color</option>
+                <option value="fade">Fade In/Out</option>
+                <option value="pulse">Pulse</option>
+                <option value="rainbow">Rainbow</option>
+                <option value="chase">Chase</option>
+                <option value="twinkle">Twinkle</option>
+              </select>
+              <small>Animation effect for the LEDs</small>
+            </div>
+
+            <!-- Effect Speed -->
+            <div class="config-item">
+              <label>Effect Speed: {{ ledEffectSpeed() }}%</label>
+              <input 
+                type="range" 
+                min="0" 
+                max="100" 
+                step="5"
+                [value]="ledEffectSpeed()"
+                (input)="ledEffectSpeed.set(+$any($event.target).value)"
+                [disabled]="!ledEnabled() || ledEffect() === 'solid'">
+              <small>Speed of animation effects</small>
+            </div>
+
+            <!-- Segments -->
+            <div class="config-item full-width">
+              <label>Number of Segments: {{ ledSegments() }}</label>
+              <input 
+                type="range" 
+                min="1" 
+                max="3" 
+                step="1"
+                [value]="ledSegments()"
+                (input)="ledSegments.set(+$any($event.target).value)"
+                [disabled]="!ledEnabled()">
+              <small>Divide strip into independent controllable segments</small>
+            </div>
+
+            <!-- Segment Configuration -->
+            @if (ledSegments() >= 1) {
+              <div class="config-item full-width segment-config">
+                <h4>Segment 1</h4>
+                <div class="segment-inputs">
+                  <div>
+                    <label>Start LED</label>
+                    <input 
+                      type="number" 
+                      [value]="ledSegment1Start()"
+                      (input)="ledSegment1Start.set(+$any($event.target).value)"
+                      [disabled]="!ledEnabled()">
+                  </div>
+                  <div>
+                    <label>End LED</label>
+                    <input 
+                      type="number" 
+                      [value]="ledSegment1End()"
+                      (input)="ledSegment1End.set(+$any($event.target).value)"
+                      [disabled]="!ledEnabled()">
+                  </div>
+                  <div>
+                    <label>Color</label>
+                    <input 
+                      type="color" 
+                      [value]="ledSegment1Color()"
+                      (input)="ledSegment1Color.set($any($event.target).value)"
+                      [disabled]="!ledEnabled()">
+                  </div>
+                </div>
+              </div>
+            }
+
+            @if (ledSegments() >= 2) {
+              <div class="config-item full-width segment-config">
+                <h4>Segment 2</h4>
+                <div class="segment-inputs">
+                  <div>
+                    <label>Start LED</label>
+                    <input 
+                      type="number" 
+                      [value]="ledSegment2Start()"
+                      (input)="ledSegment2Start.set(+$any($event.target).value)"
+                      [disabled]="!ledEnabled()">
+                  </div>
+                  <div>
+                    <label>End LED</label>
+                    <input 
+                      type="number" 
+                      [value]="ledSegment2End()"
+                      (input)="ledSegment2End.set(+$any($event.target).value)"
+                      [disabled]="!ledEnabled()">
+                  </div>
+                  <div>
+                    <label>Color</label>
+                    <input 
+                      type="color" 
+                      [value]="ledSegment2Color()"
+                      (input)="ledSegment2Color.set($any($event.target).value)"
+                      [disabled]="!ledEnabled()">
+                  </div>
+                </div>
+              </div>
+            }
+
+            @if (ledSegments() >= 3) {
+              <div class="config-item full-width segment-config">
+                <h4>Segment 3</h4>
+                <div class="segment-inputs">
+                  <div>
+                    <label>Start LED</label>
+                    <input 
+                      type="number" 
+                      [value]="ledSegment3Start()"
+                      (input)="ledSegment3Start.set(+$any($event.target).value)"
+                      [disabled]="!ledEnabled()">
+                  </div>
+                  <div>
+                    <label>End LED</label>
+                    <input 
+                      type="number" 
+                      [value]="ledSegment3End()"
+                      (input)="ledSegment3End.set(+$any($event.target).value)"
+                      [disabled]="!ledEnabled()">
+                  </div>
+                  <div>
+                    <label>Color</label>
+                    <input 
+                      type="color" 
+                      [value]="ledSegment3Color()"
+                      (input)="ledSegment3Color.set($any($event.target).value)"
+                      [disabled]="!ledEnabled()">
+                  </div>
+                </div>
+              </div>
+            }
+
+            <!-- Power & Safety -->
+            <div class="config-item">
+              <label>Power Limit: {{ ledPowerLimit() }}W</label>
+              <input 
+                type="range" 
+                min="5" 
+                max="100" 
+                step="5"
+                [value]="ledPowerLimit()"
+                (input)="ledPowerLimit.set(+$any($event.target).value)"
+                [disabled]="!ledEnabled()">
+              <small>Maximum power consumption</small>
+            </div>
+
+            <div class="config-item">
+              <label>Max Current per LED: {{ ledMaxCurrent() }}mA</label>
+              <input 
+                type="number" 
+                min="10" 
+                max="60"
+                [value]="ledMaxCurrent()"
+                (input)="ledMaxCurrent.set(+$any($event.target).value)"
+                [disabled]="!ledEnabled()">
+              <small>SK6812B: ~60mA max per LED at full white</small>
+            </div>
+
+            <!-- Advanced Options -->
+            <div class="config-item full-width">
+              <label class="toggle-label">
+                <input 
+                  type="checkbox" 
+                  [checked]="ledTemperatureCompensation()"
+                  (change)="ledTemperatureCompensation.set(!ledTemperatureCompensation())"
+                  [disabled]="!ledEnabled()">
+                <span>Temperature Compensation (reduce brightness at high temps)</span>
+              </label>
+            </div>
+
+            <div class="config-item">
+              <label>Gamma Correction: {{ ledGammaCorrection() }}</label>
+              <input 
+                type="range" 
+                min="1.0" 
+                max="3.0" 
+                step="0.1"
+                [value]="ledGammaCorrection()"
+                (input)="ledGammaCorrection.set(+$any($event.target).value)"
+                [disabled]="!ledEnabled()">
+              <small>Color correction curve (2.2 is typical)</small>
+            </div>
+
+            <div class="config-item">
+              <label>Color Order</label>
+              <select 
+                [value]="ledColorOrder()"
+                (change)="ledColorOrder.set($any($event.target).value)"
+                [disabled]="!ledEnabled()">
+                <option value="GRB">GRB (SK6812B default)</option>
+                <option value="RGB">RGB</option>
+                <option value="RGBW">RGBW (with white channel)</option>
+              </select>
+              <small>Data order for the LED controller</small>
+            </div>
+          </div>
+
+          <div class="config-actions">
+            <button class="btn btn-test" (click)="testLedPreview()" [disabled]="!ledEnabled()">
+              Test Preview (5s)
+            </button>
+            <button class="btn btn-primary" (click)="saveLedConfig()" [disabled]="saving()">
+              @if (saving()) {
+                <span class="spinner"></span> Saving...
+              } @else {
+                Save LED Config
+              }
+            </button>
+            <button class="btn btn-secondary" (click)="resetToDefaults()">
+              Reset to Defaults
+            </button>
+          </div>
+        </div>
+      }
+    </div>
+
+    <!-- Status Messages -->
+    @if (saveSuccess()) {
+      <div class="status-message success">
+        ✓ Configuration saved successfully
+      </div>
+    }
+
+    @if (errorMessage()) {
+      <div class="status-message error">
+        ✗ {{ errorMessage() }}
+      </div>
+    }
+
+    @if (loading()) {
+      <div class="loading-overlay">
+        <div class="spinner-large"></div>
+        <p>Loading configuration...</p>
+      </div>
+    }
+  } @else {
+    <div class="empty-state-large">
+      <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10"/>
+        <circle cx="12" cy="12" r="6"/>
+        <circle cx="12" cy="12" r="2"/>
+      </svg>
+      <h3>Select a Device</h3>
+      <p>Choose a coordinator or node to customize its hardware parameters</p>
+    </div>
+  }
+</div>

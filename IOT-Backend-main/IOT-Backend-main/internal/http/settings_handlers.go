@@ -3,6 +3,7 @@ package http
 import (
 	"encoding/json"
 	"net/http"
+	"os"
 
 	"github.com/DICEsda/IOT-TileNodeCoordinator/backend/internal/repository"
 )
@@ -30,6 +31,30 @@ func (h *Handler) GetSettings(w http.ResponseWriter, r *http.Request) {
 			Zones:             []string{"Living Room", "Bedroom", "Kitchen", "Bathroom", "Office", "Hallway"},
 			GoogleHomeEnabled: false,
 		}
+	}
+
+	// Populate current MQTT credentials from environment
+	if broker := os.Getenv("MQTT_BROKER"); broker != "" {
+		settings.MqttBroker = broker
+	} else {
+		settings.MqttBroker = "tcp://mosquitto:1883"
+	}
+	
+	if username := os.Getenv("MQTT_USERNAME"); username != "" {
+		settings.MqttUsername = username
+	}
+	
+	if password := os.Getenv("MQTT_PASSWORD"); password != "" {
+		settings.MqttPassword = password
+	}
+	
+	// Populate WiFi credentials from environment (if set)
+	if wifiSSID := os.Getenv("ESP32_WIFI_SSID"); wifiSSID != "" {
+		settings.WifiSSID = wifiSSID
+	}
+	
+	if wifiPassword := os.Getenv("ESP32_WIFI_PASSWORD"); wifiPassword != "" {
+		settings.WifiPassword = wifiPassword
 	}
 
 	w.Header().Set("Content-Type", "application/json")

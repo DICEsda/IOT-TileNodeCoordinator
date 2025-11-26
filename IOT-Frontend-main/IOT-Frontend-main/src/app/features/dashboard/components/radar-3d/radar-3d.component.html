@@ -1,0 +1,92 @@
+<div class="radar-card">
+  <!-- Header -->
+  <div class="radar-header">
+    <div class="radar-title">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10"/>
+        <circle cx="12" cy="12" r="6"/>
+        <circle cx="12" cy="12" r="2"/>
+      </svg>
+      <div>
+        <h2>mmWave Radar - 3D View</h2>
+        <p class="subtitle">HLK-LD2450 Motion Detection</p>
+      </div>
+    </div>
+    <div class="radar-status">
+      <span class="badge" [class.active]="presenceDetected">
+        {{ presenceDetected ? 'Presence Detected' : 'No Presence' }}
+      </span>
+      <span class="meta-item">Targets: {{ targetCount }}/3</span>
+      <span class="meta-item" *ngIf="lastUpdated">
+        {{ lastUpdated | date:'HH:mm:ss' }}
+      </span>
+    </div>
+  </div>
+
+  <!-- 3D Canvas & Data Panel -->
+  <div class="radar-body">
+    <div class="canvas-container">
+      <canvas #renderCanvas></canvas>
+      <div class="canvas-hint">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 19l-7-7 7-7M5 12h14"/>
+        </svg>
+        <span>Drag to rotate • Scroll to zoom</span>
+      </div>
+    </div>
+
+    <div class="data-panel">
+      <h3>Live Targets</h3>
+      
+      <div class="empty-state" *ngIf="!latestFrame || targetCount === 0">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <circle cx="12" cy="12" r="10"/>
+          <line x1="12" y1="8" x2="12" y2="12"/>
+          <line x1="12" y1="16" x2="12.01" y2="16"/>
+        </svg>
+        <p>No targets detected</p>
+        <small>Waiting for radar data...</small>
+      </div>
+
+      <div class="target-list" *ngIf="latestFrame && targetCount > 0">
+        <div class="target-item" *ngFor="let target of latestFrame.targets.slice(0, 3); let i = index">
+          <div class="target-id">
+            <span class="dot" [style.opacity]="1 - (i * 0.25)"></span>
+            <span>Target {{ target.id }}</span>
+          </div>
+          <div class="target-data">
+            <div class="data-row">
+              <span class="label">Distance:</span>
+              <span class="value">{{ target.distance_mm / 1000 | number:'1.2-2' }} m</span>
+            </div>
+            <div class="data-row">
+              <span class="label">Position:</span>
+              <span class="value">
+                X: {{ target.position_x_mm / 1000 | number:'1.2-2' }}m, 
+                Y: {{ target.position_y_mm / 1000 | number:'1.2-2' }}m
+              </span>
+            </div>
+            <div class="data-row">
+              <span class="label">Velocity:</span>
+              <span class="value">
+                Vx: {{ target.velocity_x_m_s | number:'1.2-2' }} m/s, 
+                Vy: {{ target.velocity_y_m_s | number:'1.2-2' }} m/s
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="radar-info" *ngIf="latestFrame">
+        <div class="info-row">
+          <span>Confidence:</span>
+          <span>{{ latestFrame.confidence | number:'1.0-2' }}</span>
+        </div>
+        <div class="info-row">
+          <span>Sensor ID:</span>
+          <span>{{ latestFrame.sensor_id }}</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

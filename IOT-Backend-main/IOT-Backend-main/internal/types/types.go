@@ -26,6 +26,7 @@ type Node struct {
 	LastSeen      time.Time  `bson:"last_seen" json:"last_seen"`
 	SiteId        string     `bson:"site_id" json:"site_id"`
 	CoordinatorId string     `bson:"coordinator_id" json:"coordinator_id"`
+	ZoneId        string     `bson:"zone_id,omitempty" json:"zone_id,omitempty"`
 }
 
 type Coordinator struct {
@@ -48,6 +49,15 @@ type Site struct {
 	Config    string    `bson:"config" json:"config"`
 	CreatedAt time.Time `bson:"created_at" json:"created_at"`
 	UpdatedAt time.Time `bson:"updated_at" json:"updated_at"`
+}
+
+type Zone struct {
+	Id            string    `bson:"_id,omitempty" json:"_id"`
+	Name          string    `bson:"name" json:"name"`
+	SiteId        string    `bson:"site_id" json:"site_id"`
+	CoordinatorId string    `bson:"coordinator_id" json:"coordinator_id"`
+	CreatedAt     time.Time `bson:"created_at" json:"created_at"`
+	UpdatedAt     time.Time `bson:"updated_at" json:"updated_at"`
 }
 
 type Telemetry struct {

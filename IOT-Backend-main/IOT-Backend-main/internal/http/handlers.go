@@ -24,12 +24,14 @@ type Params struct {
 	Repo        repository.Repository
 	MqttClient  mqtt.Client
 	Broadcaster *WSBroadcaster
+	RadarCache  *RadarCache
 }
 
 type Handler struct {
 	Repo        repository.Repository
 	mqttClient  mqtt.Client
 	broadcaster *WSBroadcaster
+	radarCache  *RadarCache
 }
 
 func NewHandler(p Params) *Handler {
@@ -37,6 +39,7 @@ func NewHandler(p Params) *Handler {
 		Repo:        p.Repo,
 		mqttClient:  p.MqttClient,
 		broadcaster: p.Broadcaster,
+		radarCache:  p.RadarCache,
 	}
 }
 
@@ -77,10 +80,28 @@ func RegisterHandlers(h *Handler, router *mux.Router) {
 	router.HandleFunc("/api/v1/settings", h.GetSettings).Methods("GET")
 	router.HandleFunc("/api/v1/settings", h.SaveSettings).Methods("PUT")
 
+	// Zone Management API
+	router.HandleFunc("/api/v1/zones", h.CreateZone).Methods("POST")
+	router.HandleFunc("/api/v1/zones", h.GetZones).Methods("GET")
+	router.HandleFunc("/api/v1/zones/{id}", h.GetZone).Methods("GET")
+	router.HandleFunc("/api/v1/zones/{id}", h.UpdateZone).Methods("PUT")
+	router.HandleFunc("/api/v1/zones/{id}", h.DeleteZone).Methods("DELETE")
+
+	// Radar Visualization API
+	router.HandleFunc("/api/radar/{siteId}/{coordId}/image", h.GetRadarImage).Methods("GET")
+	router.HandleFunc("/api/radar/{siteId}/{coordId}/data", h.GetRadarData).Methods("GET")
+
 	// Google Home Integration API
 	router.HandleFunc("/api/v1/google/auth", h.InitiateGoogleAuth).Methods("GET")
 	router.HandleFunc("/api/v1/google/callback", h.GoogleAuthCallback).Methods("GET")
 	router.HandleFunc("/api/v1/google/disconnect", h.DisconnectGoogleHome).Methods("POST")
+
+	// Customization API
+	router.HandleFunc("/api/v1/{type:coordinator|node}/{id}/customize", h.GetCustomizationConfig).Methods("GET")
+	router.HandleFunc("/api/v1/{type:coordinator|node}/{id}/customize/config", h.UpdateCoordinatorConfig).Methods("PUT")
+	router.HandleFunc("/api/v1/{type:coordinator|node}/{id}/customize/led", h.UpdateLEDConfig).Methods("PUT")
+	router.HandleFunc("/api/v1/{type:coordinator|node}/{id}/customize/reset", h.ResetToDefaults).Methods("POST")
+	router.HandleFunc("/api/v1/{type:coordinator|node}/{id}/led/preview", h.LEDPreview).Methods("POST")
 
 	// Nodes API
 	router.HandleFunc("/nodes/{id}", h.getNodeById).Methods("GET")

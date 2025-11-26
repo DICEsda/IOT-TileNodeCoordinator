@@ -328,3 +328,85 @@ func (r *MongoRepository) SaveSettings(settings *Settings) error {
 	_, err := coll.UpdateOne(ctx, filter, update, opts)
 	return err
 }
+
+// CreateZone creates a new zone
+func (r *MongoRepository) CreateZone(ctx context.Context, zone *types.Zone) error {
+	coll := r.db.Collection("zones")
+	zone.CreatedAt = time.Now()
+	zone.UpdatedAt = time.Now()
+	_, err := coll.InsertOne(ctx, zone)
+	return err
+}
+
+// GetZoneById retrieves a zone by ID
+func (r *MongoRepository) GetZoneById(id string) (*types.Zone, error) {
+	ctx := context.Background()
+	coll := r.db.Collection("zones")
+	zone := &types.Zone{}
+	if err := coll.FindOne(ctx, bson.M{"_id": id}).Decode(zone); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, fmt.Errorf("zone with id %s not found: %w", id, err)
+		}
+		return nil, err
+	}
+	return zone, nil
+}
+
+// GetZonesBySite retrieves all zones for a site
+func (r *MongoRepository) GetZonesBySite(siteId string) ([]*types.Zone, error) {
+	ctx := context.Background()
+	coll := r.db.Collection("zones")
+	cursor, err := coll.Find(ctx, bson.M{"site_id": siteId})
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	var zones []*types.Zone
+	if err := cursor.All(ctx, &zones); err != nil {
+		return nil, err
+	}
+	return zones, nil
+}
+
+// GetZoneByCoordinator retrieves the zone assigned to a specific coordinator
+func (r *MongoRepository) GetZoneByCoordinator(siteId string, coordinatorId string) (*types.Zone, error) {
+	ctx := context.Background()
+	coll := r.db.Collection("zones")
+	zone := &types.Zone{}
+	filter := bson.M{
+		"site_id":        siteId,
+		"coordinator_id": coordinatorId,
+	}
+	if err := coll.FindOne(ctx, filter).Decode(zone); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, nil // No zone assigned to this coordinator
+		}
+		return nil, err
+	}
+	return zone, nil
+}
+
+// DeleteZone deletes a zone
+func (r *MongoRepository) DeleteZone(ctx context.Context, zoneId string) error {
+	coll := r.db.Collection("zones")
+	_, err := coll.DeleteOne(ctx, bson.M{"_id": zoneId})
+	if err != nil {
+		return err
+	}
+
+	// Remove zone assignment from all nodes in this zone
+	nodesColl := r.db.Collection("nodes")
+	_, err = nodesColl.UpdateMany(ctx, bson.M{"zone_id": zoneId}, bson.M{"$unset": bson.M{"zone_id": ""}})
+	return err
+}
+
+// UpdateZone updates a zone
+func (r *MongoRepository) UpdateZone(ctx context.Context, zone *types.Zone) error {
+	coll := r.db.Collection("zones")
+	zone.UpdatedAt = time.Now()
+	filter := bson.M{"_id": zone.Id}
+	update := bson.M{"$set": zone}
+	_, err := coll.UpdateOne(ctx, filter, update)
+	return err
+}

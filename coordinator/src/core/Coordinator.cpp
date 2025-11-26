@@ -1,6 +1,7 @@
 #include "Coordinator.h"
 #include "../utils/Logger.h"
 #include "../../shared/src/EspNowMessage.h"
+#include "../../shared/src/ConfigManager.h"
 #include "../comm/WifiManager.h"
 #include "../sensors/AmbientLightSensor.h"
 #include <algorithm>
@@ -216,6 +217,28 @@ bool Coordinator::begin() {
     }
     Logger::info("Node registry initialized successfully");
     publishLog("Node registry initialized successfully", "INFO", "setup");
+    
+    // Auto-pair all stored nodes with ESP-NOW on boot
+    auto storedNodes = nodes->getAllNodeMacs();
+    if (storedNodes.size() > 0) {
+        Logger::info("Auto-pairing %d stored node(s) with ESP-NOW...", storedNodes.size());
+        for (const auto& macStr : storedNodes) {
+            uint8_t mac[6];
+            if (EspNow::macStringToBytes(macStr, mac)) {
+                if (espNow->addPeer(mac)) {
+                    Logger::info("  ✓ Re-paired node: %s", macStr.c_str());
+                } else {
+                    Logger::warn("  ✗ Failed to re-pair node: %s", macStr.c_str());
+                }
+            } else {
+                Logger::error("  ✗ Invalid MAC format: %s", macStr.c_str());
+            }
+        }
+        Logger::info("Auto-pairing complete: %d/%d nodes paired", storedNodes.size(), storedNodes.size());
+    } else {
+        Logger::info("No stored nodes to auto-pair");
+    }
+    
     nodes->setNodeRegisteredCallback([this](const String& nodeId, const String& lightId) {
         Logger::info("Node %s paired to light %s", nodeId.c_str(), lightId.c_str());
         if (espNow) {
@@ -326,6 +349,9 @@ return true;
 }
 
 void Coordinator::loop() {
+    // Handle serial commands (must be before other loops to respond quickly)
+    handleSerialCommands();
+    
     if (wifi) {
         wifi->loop();
     }
@@ -809,6 +835,59 @@ void Coordinator::handleMqttCommand(const String& topic, const String& payload) 
         manualLedMode = false;
         Logger::info("Manual LED override cleared");
         updateLeds();
+    } else if (cmd == "update_config") {
+        // Handle configuration updates from frontend
+        JsonObject configObj = doc["config"];
+        if (!configObj.isNull()) {
+            ConfigManager config("coordinator");
+            if (!config.begin()) {
+                Logger::error("Failed to open config namespace");
+                publishLog("Config update failed: namespace error", "ERROR", "config");
+                return;
+            }
+            
+            int updateCount = 0;
+            
+            // Update each key from the config object
+            for (JsonPair kv : configObj) {
+                String key = kv.key().c_str();
+                
+                if (kv.value().is<int>()) {
+                    if (config.setInt(key, kv.value().as<int>())) {
+                        updateCount++;
+                        Logger::info("Updated config: %s = %d", key.c_str(), kv.value().as<int>());
+                    }
+                } else if (kv.value().is<float>()) {
+                    if (config.setFloat(key, kv.value().as<float>())) {
+                        updateCount++;
+                        Logger::info("Updated config: %s = %.2f", key.c_str(), kv.value().as<float>());
+                    }
+                } else if (kv.value().is<bool>()) {
+                    if (config.setBool(key, kv.value().as<bool>())) {
+                        updateCount++;
+                        Logger::info("Updated config: %s = %s", key.c_str(), kv.value().as<bool>() ? "true" : "false");
+                    }
+                } else if (kv.value().is<const char*>()) {
+                    if (config.setString(key, kv.value().as<String>())) {
+                        updateCount++;
+                        Logger::info("Updated config: %s = %s", key.c_str(), kv.value().as<String>().c_str());
+                    }
+                }
+            }
+            
+            config.end();
+            
+            String msg = "Configuration updated: " + String(updateCount) + " parameters changed";
+            publishLog(msg, "INFO", "config");
+            Logger::info("%s", msg.c_str());
+            
+            // Note: A reboot may be required for some parameters to take effect
+            if (updateCount > 0) {
+                Logger::warn("Some config changes may require restart to take effect");
+            }
+        } else {
+            Logger::warn("update_config command received with empty config object");
+        }
     }
 }
 
@@ -1003,3 +1082,77 @@ void Coordinator::printBootSummary() {
     Serial.println();
 }
 
+
+void Coordinator::handleSerialCommands() {
+    static String commandBuffer;
+    
+    while (Serial.available()) {
+        char c = Serial.read();
+        
+        if (c == '\n' || c == '\r') {
+            if (commandBuffer.length() > 0) {
+                commandBuffer.trim();
+                commandBuffer.toLowerCase();
+                
+                // Process command
+                if (commandBuffer == "help" || commandBuffer == "?") {
+                    Serial.println();
+                    Serial.println("═══════════════════════════════════════");
+                    Serial.println("  COORDINATOR SERIAL MENU");
+                    Serial.println("═══════════════════════════════════════");
+                    Serial.println("  help, ?       - Show this menu");
+                    Serial.println("  wifi          - Reconfigure Wi-Fi");
+                    Serial.println("  mqtt          - Reconfigure MQTT");
+                    Serial.println("  status        - Show system status");
+                    Serial.println("  pair          - Start pairing mode (60s)");
+                    Serial.println("  reboot        - Restart coordinator");
+                    Serial.println("═══════════════════════════════════════");
+                    Serial.println();
+                    
+                } else if (commandBuffer == "wifi") {
+                    if (wifi) {
+                        Serial.println();
+                        wifi->reconfigureWifi();
+                    } else {
+                        Serial.println("✗ WiFi manager not available");
+                    }
+                    
+                } else if (commandBuffer == "mqtt") {
+                    if (mqtt) {
+                        Serial.println();
+                        mqtt->runProvisioningWizard();
+                    } else {
+                        Serial.println("✗ MQTT not available");
+                    }
+                    
+                } else if (commandBuffer == "status") {
+                    Serial.println();
+                    printSerialTelemetry();
+                    
+                } else if (commandBuffer == "pair") {
+                    Serial.println();
+                    startPairingWindow(60000, "serial command");
+                    Serial.println("✓ Pairing mode activated for 60 seconds");
+                    
+                } else if (commandBuffer == "reboot") {
+                    Serial.println();
+                    Serial.println("Rebooting coordinator...");
+                    delay(500);
+                    ESP.restart();
+                    
+                } else if (commandBuffer.length() > 0) {
+                    Serial.printf("✗ Unknown command: '%s' (type 'help' for menu)\n", commandBuffer.c_str());
+                }
+                
+                commandBuffer = "";
+            }
+        } else {
+            commandBuffer += c;
+            // Limit buffer size to prevent overflow
+            if (commandBuffer.length() > 64) {
+                commandBuffer = "";
+                Serial.println("✗ Command too long, cleared");
+            }
+        }
+    }
+}

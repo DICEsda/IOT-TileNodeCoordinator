@@ -21,6 +21,7 @@ public:
     bool begin();
     void loop();
     bool ensureConnected();
+    bool reconfigureWifi(); // Interactive WiFi reconfiguration at runtime
 
     bool isConnected() const { return status.connected; }
     bool isOffline() const { return status.offlineMode; }

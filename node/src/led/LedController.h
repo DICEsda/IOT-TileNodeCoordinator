@@ -6,7 +6,7 @@
 
 class LedController {
 public:
-    explicit LedController(uint16_t numPixelsPerStrip = 4);
+    explicit LedController(uint16_t numPixels = 1);
     ~LedController();
 
     void begin();
@@ -15,25 +15,16 @@ public:
     void update(); // Call this in loop to handle fading
     void clear();
     uint8_t getCurrentBrightness() const { return currentBrightness; }
-    uint16_t numPixels() const { return 12; } // Total: 3 strips x 4 LEDs
+    uint16_t numPixels() const { return strip.numPixels(); }
     uint32_t getCurrentColor() const { return currentColor; }
 
-    // Status patterns per PRD v0.5 (pairing/ota/error/operational)
-    // Added Connected mode: green trailing animation indicating readiness
-    enum class StatusMode { None, Pairing, OTA, Error, Idle, Connected, Wave };
+    // Status patterns per PRD v0.5 (pairing/ota/error/operational idle)
+    enum class StatusMode { None, Pairing, OTA, Error, Idle };
     void setStatus(StatusMode mode);
     bool isAnimating() const { return status != StatusMode::None; }
-    
-    // Wave control (coordinated test)
-    void startWave(uint16_t periodMs, uint32_t durationMs);
 
 private:
-    static constexpr uint8_t BRIGHTNESS_CAP = 128; // 50% cap globally for all modes
-    static constexpr uint8_t NUM_STRIPS = 3; // 3 LED strips
-
-    Adafruit_NeoPixel strip1;
-    Adafruit_NeoPixel strip2;
-    Adafruit_NeoPixel strip3;
+    Adafruit_NeoPixel strip;
     uint8_t currentBrightness;
     uint8_t targetBrightness;
     uint32_t currentColor;
