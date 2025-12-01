@@ -18,8 +18,8 @@ namespace Pins {
     constexpr uint8_t DEBUG_RX = 20;     // UART0 RX
     
     // I2C for TMP177 Temperature Sensor
-    constexpr uint8_t I2C_SDA = 20;      // I2C SDA for TMP177
-    constexpr uint8_t I2C_SCL = 10;      // I2C SCL for TMP177
+    constexpr uint8_t I2C_SDA = 1;       // I2C SDA for TMP177
+    constexpr uint8_t I2C_SCL = 2;       // I2C SCL for TMP177
     
     // ESP32-C3-MINI-1 Built-in LED control
     struct RgbLed {

@@ -216,9 +216,10 @@ export interface HealthStatus {
 // ============================================================================
 
 export interface WSMessage {
-  type: 'telemetry' | 'presence' | 'status' | 'pairing' | 'command_ack' | 'error';
+  type: 'telemetry' | 'presence' | 'status' | 'pairing' | 'command_ack' | 'error' | 'coord_telemetry' | 'node_telemetry' | 'message' | 'subscribed' | 'unsubscribed' | 'published';
   payload: any;
   timestamp: Date;
+  topic?: string;
 }
 
 export interface WSTelemetryMessage extends WSMessage {

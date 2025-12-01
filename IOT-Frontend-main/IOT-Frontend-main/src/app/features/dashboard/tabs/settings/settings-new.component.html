@@ -1,16 +1,6 @@
 <div class="settings-container">
   <div class="settings-header card">
     <h2>System Settings</h2>
-    <div class="header-actions">
-      <button class="button button-primary" (click)="saveSettings()">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
-          <polyline points="17 21 17 13 7 13 7 21"/>
-          <polyline points="7 3 7 8 15 8"/>
-        </svg>
-        Save Changes
-      </button>
-    </div>
   </div>
 
   <div class="settings-grid">
@@ -24,7 +14,16 @@
         Coordinator Control
       </h3>
 
-      <div class="coordinator-info">
+      <div *ngIf="!coordinatorOnline()" class="loading-state">
+        <p>Waiting for coordinator</p>
+        <div class="loading-dots">
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+      </div>
+
+      <div *ngIf="coordinatorOnline()" class="coordinator-info">
         <div class="info-row">
           <span class="label">Coordinator ID:</span>
           <span class="value">{{ coordinatorId }}</span>
@@ -41,7 +40,7 @@
         </div>
       </div>
 
-      <div class="control-buttons">
+      <div *ngIf="coordinatorOnline()" class="control-buttons">
         <button 
           class="button button-primary"
           (click)="enterPairingMode()"
@@ -87,7 +86,16 @@
         Node Management
       </h3>
 
-      <div *ngIf="!node(); else nodeManagement" class="empty-state-inline">
+      <div *ngIf="!coordinatorOnline()" class="loading-state">
+        <p>Waiting for node</p>
+        <div class="loading-dots">
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+      </div>
+
+      <div *ngIf="coordinatorOnline() && !node()" class="empty-state-inline">
         <p>No node paired yet</p>
         <button class="button button-primary" (click)="enterPairingMode()">
           Pair a Node
@@ -95,7 +103,7 @@
       </div>
 
       <ng-template #nodeManagement>
-        <div class="node-card">
+        <div *ngIf="coordinatorOnline()" class="node-card">
           <div class="node-header">
             <div class="node-info">
               <h4>{{ node()?.name || node()?.node_id }}</h4>
@@ -175,7 +183,17 @@
         Zone Management
       </h3>
 
+      <div *ngIf="!coordinatorOnline()" class="loading-state">
+        <p>Waiting for coordinator</p>
+        <div class="loading-dots">
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+      </div>
+
       <!-- Zone creation form -->
+      <div *ngIf="coordinatorOnline() && showZoneForm" class="zone-form">
       <div *ngIf="showZoneForm" class="zone-form">
         <div class="form-group">
           <label>Zone Name</label>
@@ -212,7 +230,7 @@
       </div>
 
       <!-- Existing zones list -->
-      <div *ngIf="!showZoneForm && managedZones().length > 0" class="zones-list">
+      <div *ngIf="coordinatorOnline() && !showZoneForm && managedZones().length > 0" class="zones-list">
         <div *ngFor="let zone of managedZones()" class="zone-card">
           <div class="zone-header">
             <div class="zone-title">
@@ -253,7 +271,7 @@
       </div>
 
       <!-- Empty state -->
-      <div *ngIf="!showZoneForm && managedZones().length === 0" class="empty-state">
+      <div *ngIf="coordinatorOnline() && !showZoneForm && managedZones().length === 0" class="empty-state">
         <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.3">
           <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
           <circle cx="12" cy="10" r="3"/>
@@ -264,7 +282,7 @@
 
       <!-- Add zone button -->
       <button 
-        *ngIf="!showZoneForm" 
+        *ngIf="coordinatorOnline() && !showZoneForm"
         class="button" 
         (click)="showZoneForm = true" 
         style="margin-top: 1rem; width: 100%;"
@@ -285,83 +303,42 @@
       </div>
     </div>
 
-    <!-- WiFi Configuration -->
-    <div class="settings-section card">
+
+    <!-- mmWave Zone Creator -->
+    <div class="settings-section card" style="grid-column: span 2;">
       <h3>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M5 12.55a11 11 0 0 1 14.08 0"/>
-          <path d="M1.42 9a16 16 0 0 1 21.16 0"/>
-          <path d="M8.53 16.11a6 6 0 0 1 6.95 0"/>
-          <line x1="12" y1="20" x2="12.01" y2="20"/>
+          <rect x="2" y="2" width="20" height="20" rx="4"/>
+          <circle cx="12" cy="12" r="3"/>
         </svg>
-        WiFi Configuration
+        mmWave Zone Creator
       </h3>
 
-      <div class="setting-item">
-        <label>WiFi SSID</label>
-        <input 
-          type="text" 
-          [(ngModel)]="wifiSSID"
-          placeholder="Enter WiFi network name"
-          class="text-input">
-        <p class="current-value">Current: {{ currentWifiSSID }}</p>
+      <div *ngIf="!coordinatorOnline()" class="loading-state">
+        <p>Waiting for coordinator</p>
+        <div class="loading-dots">
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
       </div>
 
-      <div class="setting-item">
-        <label>WiFi Password</label>
-        <input 
-          type="text" 
-          [(ngModel)]="wifiPassword"
-          placeholder="Enter WiFi password"
-          class="text-input">
-        <p class="current-value">Current: {{ currentWifiPassword || 'Not set' }}</p>
+      <div *ngIf="coordinatorOnline()" class="setting-item">
+        <label>Draw mmWave Zones (2D)</label>
+        <div style="border:1px solid #ccc; width:100%; max-width:800px; height:600px; position:relative; background:#f9f9f9; margin: 0 auto;">
+          <!-- Placeholder for 2D zone drawing canvas -->
+          <canvas #zoneCanvas width="800" height="600" style="width:100%;height:100%;"></canvas>
+        </div>
+        <button class="button button-primary" (click)="saveMmwaveZones()" style="margin-top:1rem;">Save Zones</button>
       </div>
-
-      <button 
-        class="button button-primary"
-        (click)="updateWiFiConfig()"
-        style="width: 100%; margin-top: 0.5rem;">
-        Update WiFi Settings
-      </button>
-    </div>
-
-    <!-- MQTT Configuration -->
-    <div class="settings-section card">
-      <h3>
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
-        </svg>
-        MQTT Configuration
-      </h3>
-
-      <div class="setting-item">
-        <label>MQTT Broker</label>
-        <input 
-          type="text" 
-          [(ngModel)]="mqttBroker"
-          placeholder="tcp://mosquitto:1883"
-          class="text-input">
-        <p class="current-value">Current: {{ currentMqttBroker }}</p>
+      <div *ngIf="coordinatorOnline() && mmwaveZones.length">
+        <h4>Defined Zones</h4>
+        <ul>
+          <li *ngFor="let zone of mmwaveZones">Zone: ({{ zone.x }}, {{ zone.y }}, {{ zone.radius }})</li>
+        </ul>
       </div>
-
-      <div class="setting-item">
-        <label>MQTT Username</label>
-        <input 
-          type="text" 
-          [(ngModel)]="mqttUsername"
-          placeholder="Enter username"
-          class="text-input">
-        <p class="current-value">Current: {{ currentMqttUsername }}</p>
-      </div>
-
-      <div class="setting-item">
-        <label>MQTT Password</label>
-        <input 
-          type="text" 
-          [(ngModel)]="mqttPassword"
-          placeholder="Enter password"
-          class="text-input">
-        <p class="current-value">Current: {{ currentMqttPassword || 'Not set' }}</p>
+      <div *ngIf="coordinatorOnline()" class="setting-item">
+        <p class="hint">Zones are viewable in the radar live monitor. When a target enters a zone, the corresponding node LED will turn on.</p>
       </div>
     </div>
 

@@ -71,6 +71,7 @@ struct SetLightMessage : public EspNowMessage {
 	bool override_status = false;
 	uint16_t ttl_ms = 1500;
 	String reason;
+	int8_t pixel = -1; // -1 = all pixels, 0-3 = specific pixel index
 
 	SetLightMessage();
 	String toJson() const override;

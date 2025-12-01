@@ -5,7 +5,7 @@ import { Node, Coordinator } from '../../../core/models/api.models';
 
 interface GraphNode extends d3.SimulationNodeDatum {
   id: string;
-  type: 'coordinator' | 'node';
+  type: 'coordinator' | 'node' | 'backend' | 'frontend' | 'mongodb';
   name: string;
   status: string;
   data?: any;
@@ -32,6 +32,9 @@ interface GraphLink extends d3.SimulationLinkDatum<GraphNode> {
         <div class="legend">
           <span class="item"><span class="dot coord"></span> Coordinator</span>
           <span class="item"><span class="dot node"></span> Node</span>
+          <span class="item"><span class="dot backend"></span> Backend</span>
+          <span class="item"><span class="dot frontend"></span> Frontend</span>
+          <span class="item"><span class="dot mongodb"></span> MongoDB</span>
         </div>
       </div>
     </div>
@@ -39,11 +42,11 @@ interface GraphLink extends d3.SimulationLinkDatum<GraphNode> {
   styles: [`
     .graph-container {
       width: 100%;
-      height: 400px;
+      height: 500px;
       background: #1e1e1e;
       border-radius: 12px;
       position: relative;
-      overflow: hidden;
+      overflow: visible;
       border: 1px solid rgba(255, 255, 255, 0.1);
     }
     .graph-overlay {
@@ -77,6 +80,9 @@ interface GraphLink extends d3.SimulationLinkDatum<GraphNode> {
             
             &.coord { background: #4caf50; }
             &.node { background: #2196f3; }
+            &.backend { background: #ff9800; }
+            &.frontend { background: #9c27b0; }
+            &.mongodb { background: #00897b; }
           }
         }
       }
@@ -86,10 +92,12 @@ interface GraphLink extends d3.SimulationLinkDatum<GraphNode> {
 export class NetworkGraphComponent implements OnInit, OnChanges, OnDestroy {
   @Input() nodes: Node[] = [];
   @Input() coordinators: Coordinator[] = [];
+  @Input() backendHealthy: boolean = false;
+  @Input() dbHealthy: boolean = false;
+  @Input() frontendHealthy: boolean = true;
 
   @ViewChild('graphContainer', { static: true }) container!: ElementRef;
 
-  private simulation!: d3.Simulation<GraphNode, GraphLink>;
   private svg!: d3.Selection<SVGSVGElement, unknown, null, undefined>;
   private width = 0;
   private height = 0;
@@ -99,15 +107,13 @@ export class NetworkGraphComponent implements OnInit, OnChanges, OnDestroy {
   }
 
   ngOnChanges() {
-    if (this.simulation) {
+    if (this.svg) {
       this.updateGraph();
     }
   }
 
   ngOnDestroy() {
-    if (this.simulation) {
-      this.simulation.stop();
-    }
+    // No simulation to clean up
   }
 
   private initGraph() {
@@ -124,16 +130,10 @@ export class NetworkGraphComponent implements OnInit, OnChanges, OnDestroy {
     new ResizeObserver(() => {
       this.width = element.clientWidth;
       this.height = element.clientHeight;
-      this.simulation.force('center', d3.forceCenter(this.width / 2, this.height / 2));
-      this.simulation.alpha(0.3).restart();
+      this.updateGraph();
     }).observe(element);
 
-    this.simulation = d3.forceSimulation<GraphNode>()
-      .force('link', d3.forceLink<GraphNode, GraphLink>().id((d: GraphNode) => d.id).distance(100))
-      .force('charge', d3.forceManyBody().strength(-300))
-      .force('center', d3.forceCenter(this.width / 2, this.height / 2))
-      .force('collide', d3.forceCollide().radius(30));
-
+    // No force simulation - using fixed hierarchical layout
     this.updateGraph();
   }
 
@@ -143,37 +143,112 @@ export class NetworkGraphComponent implements OnInit, OnChanges, OnDestroy {
     const graphNodes: GraphNode[] = [];
     const graphLinks: GraphLink[] = [];
 
-    this.coordinators.forEach(c => {
-      graphNodes.push({
-        id: c.coord_id,
-        type: 'coordinator',
-        name: 'Coordinator',
-        status: c.status,
-        data: c
-      });
+    // Add infrastructure nodes (no fixed positions for draggability)
+    graphNodes.push({
+      id: 'mongodb',
+      type: 'mongodb',
+      name: 'MongoDB',
+      status: this.dbHealthy ? 'online' : 'offline'
     });
 
-    this.nodes.forEach(n => {
+    graphNodes.push({
+      id: 'backend',
+      type: 'backend',
+      name: 'Backend',
+      status: this.backendHealthy ? 'online' : 'offline'
+    });
+
+    graphNodes.push({
+      id: 'frontend',
+      type: 'frontend',
+      name: 'Frontend',
+      status: this.frontendHealthy ? 'online' : 'offline'
+    });
+
+    // Add infrastructure links
+    graphLinks.push({
+      source: 'mongodb',
+      target: 'backend',
+      value: 1
+    });
+
+    graphLinks.push({
+      source: 'backend',
+      target: 'frontend',
+      value: 1
+    });
+
+    // Always show 4 coordinators - update status based on real data
+    for (let i = 1; i <= 4; i++) {
+      const coordId = `coord00${i}`;
+      
+      // Check if we have real coordinator data
+      const realCoord = this.coordinators.find(c => c.coord_id === coordId);
+      
       graphNodes.push({
-        id: n.node_id,
-        type: 'node',
-        name: n.name || `Node ${n.node_id}`,
-        status: n.status,
-        data: n
+        id: coordId,
+        type: 'coordinator',
+        name: `Coordinator ${i}`,
+        status: realCoord ? realCoord.status : 'offline',
+        data: realCoord
       });
 
-      if (this.coordinators.length > 0) {
+      // Link coordinator to backend
+      graphLinks.push({
+        source: 'backend',
+        target: coordId,
+        value: 1
+      });
+
+      // Add 5 nodes for each coordinator
+      for (let j = 1; j <= 5; j++) {
+        const nodeId = `${coordId}_node${j}`;
+        
+        // Check if we have real node data (for first coordinator only since we don't have coordinator_id)
+        const realNode = (i === 1 && this.nodes.length > 0 && j <= this.nodes.length) ? this.nodes[j - 1] : undefined;
+        
+        graphNodes.push({
+          id: nodeId,
+          type: 'node',
+          name: realNode ? (realNode.name || `${i}.${j}`) : `${i}.${j}`,
+          status: realNode ? realNode.status : 'offline',
+          data: realNode
+        });
+
+        // Link node to its coordinator
         graphLinks.push({
-          source: this.coordinators[0].coord_id,
-          target: n.node_id,
+          source: coordId,
+          target: nodeId,
           value: 1
         });
       }
-    });
+    }
 
-    this.simulation.nodes(graphNodes);
-    const linkForce = this.simulation.force('link') as d3.ForceLink<GraphNode, GraphLink>;
-    linkForce.links(graphLinks);
+    // Calculate fixed positions for hierarchical layout (well-spaced)
+    graphNodes.forEach(node => {
+      if (node.type === 'mongodb') {
+        node.x = this.width * 0.25;
+        node.y = this.height * 0.18;
+      } else if (node.type === 'backend') {
+        node.x = this.width * 0.42;
+        node.y = this.height * 0.38;
+      } else if (node.type === 'frontend') {
+        node.x = this.width * 0.58;
+        node.y = this.height * 0.38;
+      } else if (node.type === 'coordinator') {
+        const coordIndex = parseInt(node.id.replace('coord00', '')) - 1;
+        node.x = this.width * (0.23 + coordIndex * 0.17);
+        node.y = this.height * 0.6;
+      } else if (node.type === 'node') {
+        const match = node.id.match(/coord00(\d)_node(\d)/);
+        if (match) {
+          const coordIndex = parseInt(match[1]) - 1;
+          const nodeIndex = parseInt(match[2]) - 1;
+          node.x = this.width * (0.23 + coordIndex * 0.17) + (nodeIndex - 2) * 22;
+          node.y = this.height * 0.82;
+        }
+      }
+    });
 
     this.svg.selectAll('*').remove();
 
@@ -183,7 +258,28 @@ export class NetworkGraphComponent implements OnInit, OnChanges, OnDestroy {
       .selectAll('line')
       .data(graphLinks)
       .join('line')
-      .attr('stroke-width', 1);
+      .attr('stroke-width', 1.5)
+      .attr('x1', (d: GraphLink) => {
+        const source = graphNodes.find(n => n.id === (typeof d.source === 'string' ? d.source : (d.source as any).id));
+        return source?.x || 0;
+      })
+      .attr('y1', (d: GraphLink) => {
+        const source = graphNodes.find(n => n.id === (typeof d.source === 'string' ? d.source : (d.source as any).id));
+        return source?.y || 0;
+      })
+      .attr('x2', (d: GraphLink) => {
+        const target = graphNodes.find(n => n.id === (typeof d.target === 'string' ? d.target : (d.target as any).id));
+        return target?.x || 0;
+      })
+      .attr('y2', (d: GraphLink) => {
+        const target = graphNodes.find(n => n.id === (typeof d.target === 'string' ? d.target : (d.target as any).id));
+        return target?.y || 0;
+      })
+      .attr('stroke-opacity', (d: GraphLink) => {
+        const source = graphNodes.find(n => n.id === (typeof d.source === 'string' ? d.source : (d.source as any).id));
+        const target = graphNodes.find(n => n.id === (typeof d.target === 'string' ? d.target : (d.target as any).id));
+        return (source?.status === 'online' && target?.status === 'online') ? 0.6 : 0.2;
+      });
 
     const node = this.svg.append('g')
       .attr('stroke', '#fff')
@@ -191,9 +287,21 @@ export class NetworkGraphComponent implements OnInit, OnChanges, OnDestroy {
       .selectAll('circle')
       .data(graphNodes)
       .join('circle')
-      .attr('r', (d: GraphNode) => d.type === 'coordinator' ? 10 : 6)
-      .attr('fill', (d: GraphNode) => d.type === 'coordinator' ? '#4caf50' : (d.status === 'online' ? '#2196f3' : '#f44336'))
-      .call(this.drag(this.simulation));
+      .attr('cx', (d: GraphNode) => d.x || 0)
+      .attr('cy', (d: GraphNode) => d.y || 0)
+      .attr('r', (d: GraphNode) => {
+        if (d.type === 'coordinator') return 10;
+        if (['backend', 'frontend', 'mongodb'].includes(d.type)) return 12;
+        return 6;
+      })
+      .attr('fill', (d: GraphNode) => {
+        if (d.type === 'coordinator') return d.status === 'online' ? '#4caf50' : '#666';
+        if (d.type === 'backend') return d.status === 'online' ? '#ff9800' : '#666';
+        if (d.type === 'frontend') return d.status === 'online' ? '#9c27b0' : '#666';
+        if (d.type === 'mongodb') return d.status === 'online' ? '#00897b' : '#666';
+        return d.status === 'online' ? '#2196f3' : '#666';
+      })
+      .attr('opacity', (d: GraphNode) => d.status === 'online' ? 1 : 0.5);
 
     node.append('title')
       .text((d: GraphNode) => d.name);
@@ -202,53 +310,18 @@ export class NetworkGraphComponent implements OnInit, OnChanges, OnDestroy {
       .selectAll('text')
       .data(graphNodes)
       .join('text')
-      .attr('dx', 12)
-      .attr('dy', 4)
+      .attr('x', (d: GraphNode) => d.x || 0)
+      .attr('y', (d: GraphNode) => {
+        const r = d.type === 'coordinator' ? 10 : (d.type === 'node' ? 6 : 12);
+        return (d.y || 0) + r + 14;
+      })
+      .attr('text-anchor', 'middle')
       .text((d: GraphNode) => d.name)
-      .attr('fill', '#ccc')
-      .style('font-size', '10px')
+      .attr('fill', (d: GraphNode) => d.status === 'online' ? '#ffffff' : '#999')
+      .attr('font-weight', '600')
+      .style('font-size', '11px')
+      .style('letter-spacing', '0.5px')
       .style('pointer-events', 'none');
-
-    this.simulation.on('tick', () => {
-      link
-        .attr('x1', (d: GraphLink) => (d.source as GraphNode).x!)
-        .attr('y1', (d: GraphLink) => (d.source as GraphNode).y!)
-        .attr('x2', (d: GraphLink) => (d.target as GraphNode).x!)
-        .attr('y2', (d: GraphLink) => (d.target as GraphNode).y!);
-
-      node
-        .attr('cx', (d: GraphNode) => d.x!)
-        .attr('cy', (d: GraphNode) => d.y!);
-        
-      labels
-        .attr('x', (d: GraphNode) => d.x!)
-        .attr('y', (d: GraphNode) => d.y!);
-    });
-    
-    this.simulation.alpha(1).restart();
   }
 
-  private drag(simulation: d3.Simulation<GraphNode, GraphLink>) {
-    function dragstarted(event: any) {
-      if (!event.active) simulation.alphaTarget(0.3).restart();
-      event.subject.fx = event.subject.x;
-      event.subject.fy = event.subject.y;
-    }
-
-    function dragged(event: any) {
-      event.subject.fx = event.x;
-      event.subject.fy = event.y;
-    }
-
-    function dragended(event: any) {
-      if (!event.active) simulation.alphaTarget(0);
-      event.subject.fx = null;
-      event.subject.fy = null;
-    }
-
-    return d3.drag<any, GraphNode>()
-      .on('start', dragstarted)
-      .on('drag', dragged)
-      .on('end', dragended);
-  }
 }

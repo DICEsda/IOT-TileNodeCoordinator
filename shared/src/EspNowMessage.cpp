@@ -89,7 +89,7 @@ SetLightMessage::SetLightMessage() {
 }
 
 String SetLightMessage::toJson() const {
-	DynamicJsonDocument doc(256);
+	DynamicJsonDocument doc(384);
 	doc["msg"] = msg;
 	doc["cmd_id"] = cmd_id;
 	doc["light_id"] = light_id;
@@ -98,12 +98,13 @@ String SetLightMessage::toJson() const {
 	doc["fade_ms"] = fade_ms;
 	doc["override_status"] = override_status;
 	doc["ttl_ms"] = ttl_ms;
+	doc["pixel"] = pixel; // -1 = all pixels, 0-3 = specific pixel
 	if (reason.length()) doc["reason"] = reason;
 	String out; serializeJson(doc, out); return out;
 }
 
 bool SetLightMessage::fromJson(const String& json) {
-	DynamicJsonDocument doc(256);
+	DynamicJsonDocument doc(384);
 	DeserializationError err = deserializeJson(doc, json);
 	if (err) return false;
 	msg = doc["msg"].as<String>();
@@ -119,6 +120,7 @@ bool SetLightMessage::fromJson(const String& json) {
 	override_status = doc["override_status"] | false;
 	ttl_ms = doc.containsKey("ttl_ms") ? doc["ttl_ms"].as<uint16_t>() : 1500;
 	reason = doc["reason"].as<String>();
+	pixel = doc.containsKey("pixel") ? doc["pixel"].as<int8_t>() : -1;
 	return true;
 }
 
@@ -130,7 +132,7 @@ NodeStatusMessage::NodeStatusMessage() {
 }
 
 String NodeStatusMessage::toJson() const {
-	DynamicJsonDocument doc(256);
+	DynamicJsonDocument doc(384);
 	doc["msg"] = msg;
 	doc["node_id"] = node_id;
 	doc["light_id"] = light_id;
@@ -148,7 +150,7 @@ String NodeStatusMessage::toJson() const {
 }
 
 bool NodeStatusMessage::fromJson(const String& json) {
-	DynamicJsonDocument doc(256);
+	DynamicJsonDocument doc(384); // Increased from 256 to handle 220-byte payload + overhead
 	DeserializationError err = deserializeJson(doc, json);
 	if (err) return false;
 	msg = doc["msg"].as<String>();

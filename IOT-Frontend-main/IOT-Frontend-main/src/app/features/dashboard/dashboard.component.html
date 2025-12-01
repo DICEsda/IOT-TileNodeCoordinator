@@ -109,7 +109,10 @@
         <div class="graph-section">
           <app-network-graph
             [nodes]="registeredNodes()"
-            [coordinators]="registeredCoordinators()">
+            [coordinators]="registeredCoordinators()"
+            [backendHealthy]="data.apiHealthy()"
+            [dbHealthy]="data.dbHealthy()"
+            [frontendHealthy]="true">
           </app-network-graph>
         </div>
       </div>

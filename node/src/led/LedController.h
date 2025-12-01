@@ -12,14 +12,16 @@ public:
     void begin();
     void setBrightness(uint8_t brightness, uint16_t fadeMs = 0);
     void setColor(uint8_t r, uint8_t g, uint8_t b, uint8_t w = 0, uint16_t fadeMs = 0);
+    void setPixelColor(uint8_t pixelIndex, uint8_t r, uint8_t g, uint8_t b, uint8_t w = 0);
+    void show();
     void update(); // Call this in loop to handle fading
     void clear();
     uint8_t getCurrentBrightness() const { return currentBrightness; }
     uint16_t numPixels() const { return strip.numPixels(); }
     uint32_t getCurrentColor() const { return currentColor; }
 
-    // Status patterns per PRD v0.5 (pairing/ota/error/operational idle)
-    enum class StatusMode { None, Pairing, OTA, Error, Idle };
+    // Status patterns - only pairing mode kept
+    enum class StatusMode { None, Pairing };
     void setStatus(StatusMode mode);
     bool isAnimating() const { return status != StatusMode::None; }
 

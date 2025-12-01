@@ -49,6 +49,15 @@ void LedController::setColor(uint8_t r, uint8_t g, uint8_t b, uint8_t w, uint16_
     }
 }
 
+void LedController::setPixelColor(uint8_t pixelIndex, uint8_t r, uint8_t g, uint8_t b, uint8_t w) {
+    if (pixelIndex >= strip.numPixels()) return;
+    strip.setPixelColor(pixelIndex, strip.Color(r, g, b, w));
+}
+
+void LedController::show() {
+    strip.show();
+}
+
 void LedController::update() {
     if (status != StatusMode::None) {
         runStatusAnimation();
@@ -155,38 +164,7 @@ void LedController::runStatusAnimation() {
             strip.show();
             break;
         }
-        case StatusMode::OTA: {
-            // Chasing blue dot
-            uint16_t N = strip.numPixels();
-            uint16_t idx = (now / 120) % (N ? N : 1);
-            strip.clear();
-            for (uint16_t i = 0; i < N; ++i) {
-                uint8_t dim = (i == idx) ? 100 : 10;
-                strip.setPixelColor(i, strip.Color(0, 0, dim, 0));
-            }
-            strip.setBrightness(60); // <= 30%
-            strip.show();
-            break;
-        }
-        case StatusMode::Error: {
-            // Double red flash every 1.2s
-            uint16_t phase = now % 1200;
-            bool on = (phase < 120) || (phase > 240 && phase < 360);
-            strip.setBrightness(on ? 76 : 0);
-            uint32_t c = strip.Color(180, 10, 10, 0);
-            for (uint16_t i = 0; i < strip.numPixels(); i++) strip.setPixelColor(i, c);
-            strip.show();
-            break;
-        }
-        case StatusMode::Idle: {
-            // Subtle warm white breathing on W channel (~3s period)
-            float breathe = 0.5f * (1.0f + sinf((2.0f * (float)M_PI) * (now % 3000) / 3000.0f));
-            uint8_t w = 24 + (uint8_t)(breathe * 32); // 24..56
-            strip.setBrightness(28 + (uint8_t)(breathe * 20)); // 28..48
-            for (uint16_t i = 0; i < strip.numPixels(); i++) strip.setPixelColor(i, strip.Color(0, 0, 0, w));
-            strip.show();
-            break;
-        }
+
         case StatusMode::None:
         default:
             break;

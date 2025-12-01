@@ -47,9 +47,11 @@ private:
     std::function<void(const MmWaveEvent& event)> eventCallback;
     String currentZone;
     bool currentPresence;
+    bool currentZoneOccupied;
     uint32_t lastEventTime;
 
     void processRadarFrame();
+    bool isTargetInZone(int16_t x_mm, int16_t y_mm) const;
     void emitPresenceEvent(const MmWaveEvent& evt);
     void buildEventFromTargets(MmWaveEvent& evt);
     void ensureStreamHealth();

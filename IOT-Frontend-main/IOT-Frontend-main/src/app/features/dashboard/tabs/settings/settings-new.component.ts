@@ -16,6 +16,12 @@ import { Zone, Node, Coordinator } from '../../../../core/models/api.models';
   styleUrls: ['./settings.component.scss', './settings-new-additional.scss']
 })
 export class SettingsNewComponent implements OnInit, OnDestroy {
+  mmwaveZones: {x: number, y: number, radius: number}[] = [];
+  saveMmwaveZones() {
+    // TODO: Implement save logic
+    alert('Zones saved (stub)');
+  }
+
   // Authentication
   isAuthenticated = signal(false);
   passwordInput = '';
@@ -85,7 +91,7 @@ export class SettingsNewComponent implements OnInit, OnDestroy {
   
   // Coordinator status
   coordinatorId = 'COORD-001';
-  coordinatorOnline = signal(false);
+  coordinatorOnline = computed(() => this.data.coordOnline());
   firmwareVersion = 'v1.0.0';
   pairingMode = signal(false);
   pairingTimeLeft = 0;

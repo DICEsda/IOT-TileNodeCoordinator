@@ -24,6 +24,7 @@ struct MmWaveEvent {
     bool presence;
     uint32_t timestampMs;
     float confidence; // 0.0–1.0 heuristic confidence (fraction of valid targets)
+    bool zoneOccupied; // true if any target is in defined zone
     struct MmWaveTarget {
         uint8_t id;           // 1-based target id
         bool valid;           // target slot valid
@@ -34,6 +35,7 @@ struct MmWaveEvent {
         int16_t resolution_mm;// sensor reported resolution granularity
         float vx_m_s;         // estimated X velocity (m/s)
         float vy_m_s;         // estimated Y velocity (m/s)
+        bool inZone;          // true if this target is in the defined zone
     };
     std::vector<MmWaveTarget> targets; // up to sensor-specific max (LD2450: 3–4)
 };

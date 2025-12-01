@@ -263,17 +263,17 @@ void Mqtt::publishNodeStatus(const NodeStatusMessage& status) {
     
     StaticJsonDocument<1024> doc;
     doc["ts"] = startMs / 1000;
-    doc["node_id"] = status.node_id;
-    doc["light_id"] = status.light_id;
+    doc["node_id"] = status.node_id.c_str();
+    doc["light_id"] = status.light_id.c_str();
     doc["avg_r"] = status.avg_r;
     doc["avg_g"] = status.avg_g;
     doc["avg_b"] = status.avg_b;
     doc["avg_w"] = status.avg_w;
-    doc["status_mode"] = status.status_mode;
+    doc["status_mode"] = status.status_mode.length() > 0 ? status.status_mode.c_str() : "idle";
     doc["temp_c"] = status.temperature;
     doc["button_pressed"] = status.button_pressed;
     doc["vbat_mv"] = status.vbat_mv;
-    doc["fw"] = status.fw;
+    doc["fw"] = status.fw.length() > 0 ? status.fw.c_str() : "";
     
     String payload;
     serializeJson(doc, payload);
@@ -351,6 +351,11 @@ bool Mqtt::connectMqtt() {
         String cmdTopic = coordinatorCmdTopic();
         bool subSuccess = mqttClient.subscribe(cmdTopic.c_str());
         MqttLogger::logSubscribe(cmdTopic, subSuccess);
+        
+        // Subscribe to node commands (wildcard) for light control forwarding
+        String nodeCmd = "site/" + siteId + "/node/+/cmd";
+        bool nodeSubSuccess = mqttClient.subscribe(nodeCmd.c_str());
+        MqttLogger::logSubscribe(nodeCmd, nodeSubSuccess);
         
         // Publish initial telemetry
         CoordinatorSensorSnapshot snapshot;
@@ -654,6 +659,11 @@ void Mqtt::runReachabilityProbe() {
 }
 
 void Mqtt::handleMqttMessage(char* topic, uint8_t* payload, unsigned int length) {
+    // DEBUG: Print ALL MQTT messages to serial
+    Serial.printf("\n[MQTT_RX] Topic: %s\n", topic);
+    Serial.printf("[MQTT_RX] Length: %d bytes\n", length);
+    Serial.printf("[MQTT_RX] Payload: %.*s\n", length, (char*)payload);
+    
     // Log incoming message with detailed info
     MqttLogger::logReceive(String(topic), payload, length);
     

@@ -35,6 +35,7 @@ public:
 
     // Communication
     bool sendLightCommand(const String& nodeId, uint8_t brightness, uint16_t fadeMs = 0, bool overrideStatus = false, uint16_t ttlMs = 1500);
+    bool sendColorCommand(const String& nodeId, uint8_t r, uint8_t g, uint8_t b, uint8_t w, uint16_t fadeMs = 0, bool overrideStatus = false, uint16_t ttlMs = 1500, int8_t pixel = -1);
     bool broadcastPairingMessage();
     // Convert a MAC string "AA:BB:CC:DD:EE:FF" to six bytes
     static bool macStringToBytes(const String& macStr, uint8_t out[6]);

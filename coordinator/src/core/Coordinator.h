@@ -56,6 +56,7 @@ private:
     CoordinatorSensorSnapshot coordinatorSensors;
     MmWaveEvent lastMmWaveEvent;
     bool haveMmWaveSample = false;
+    bool zoneOccupiedState = false;
     uint32_t lastSensorSampleMs = 0;
     uint32_t lastSerialPrintMs = 0;
 
@@ -92,6 +93,13 @@ private:
     uint8_t manualG = 0;
     uint8_t manualB = 0;
     uint32_t manualLedTimeoutMs = 0;
+    
+    // Zone presence mode
+    bool zonePresenceMode = true;  // When enabled, nodes glow green when presence detected
+    bool lastPresenceState = false;
+    
+    // Light control mode
+    bool lightControlEnabled = true;  // When enabled, listen for frontend light commands
 
     void startFlashAll();
     void stopFlashAll();

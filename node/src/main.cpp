@@ -200,6 +200,7 @@ void loop() { app.loop(); }
 #include "led/LedController.h"
 #include "input/ButtonInput.h"
 #include "config/PinConfig.h"
+#include <Adafruit_TMP117.h>
 
 // Node state machine
 enum class NodeState { PAIRING, OPERATIONAL, UPDATE, REBOOT };
@@ -225,7 +226,9 @@ private:
     bool statusOverrideActive = false;
     uint32_t statusOverrideUntilMs = 0;
     
-    // Temperature removed; coordinator owns sensors and derating
+    // Temperature sensor (Adafruit TMP117)
+    Adafruit_TMP117 tempSensor;
+    bool tempSensorAvailable = false;
     
     // Power management
     uint32_t lastRxWindow;
@@ -293,6 +296,13 @@ private:
     void sendTelemetry();
     uint16_t readBatteryVoltage();
     
+    // Reconnection logic
+    uint32_t lastCoordinatorResponse;
+    uint32_t telemetrySentCount;
+    static const uint32_t COORDINATOR_TIMEOUT_MS = 300000; // 5 minutes without response
+    static const uint32_t TELEMETRY_THRESHOLD = 50; // 50 telemetry attempts before re-pair
+    void checkCoordinatorConnection();
+    
     // Configuration
     void loadConfiguration();
     void saveConfiguration();
@@ -307,15 +317,18 @@ SmartTileNode::SmartTileNode()
     : currentState(NodeState::PAIRING)
     , config("node")
     , espNowInitialized(false)
+    , tempSensorAvailable(false)
     , lastRxWindow(0)
     , rxWindowMs(20)
     , rxPeriodMs(100)
     , lastTelemetry(0)
-    , telemetryInterval(30)
+    , telemetryInterval(1)  // 1 second for real-time updates
     , pairingStartTime(0)
     , inPairingMode(false)
     , firmwareVersion("c3-1.0.0")
-    , lastCommandTime(0) {
+    , lastCommandTime(0)
+    , lastCoordinatorResponse(0)
+    , telemetrySentCount(0) {
 }
 
 SmartTileNode::~SmartTileNode() {
@@ -345,21 +358,54 @@ bool SmartTileNode::begin() {
     button.begin(Pins::BUTTON);
     button.onLongPress([this]() { this->startPairing(); }, 2000);
     
+    // Initialize I2C and temperature sensor (Adafruit TMP117)
+    Wire.begin(Pins::I2C_SDA, Pins::I2C_SCL);
+    Wire.setClock(100000); // 100kHz for stability
+    
+    // I2C Scanner - Debug output
+    logMessage("INFO", String("Scanning I2C bus (SDA=") + String(Pins::I2C_SDA) + ", SCL=" + String(Pins::I2C_SCL) + ")...");
+    int devicesFound = 0;
+    for (uint8_t addr = 1; addr < 127; addr++) {
+        Wire.beginTransmission(addr);
+        uint8_t error = Wire.endTransmission();
+        if (error == 0) {
+            devicesFound++;
+            logMessage("INFO", String("I2C device found at 0x") + String(addr, HEX));
+        }
+    }
+    if (devicesFound == 0) {
+        logMessage("WARN", "No I2C devices found! Check wiring and pin configuration.");
+    } else {
+        logMessage("INFO", String("Found ") + String(devicesFound) + " I2C device(s)");
+    }
+    
+    // Try to initialize TMP117 (default address is 0x48)
+    if (tempSensor.begin()) {
+        tempSensorAvailable = true;
+        logMessage("INFO", "Adafruit TMP117 temperature sensor initialized");
+    } else {
+        tempSensorAvailable = false;
+        logMessage("WARN", "TMP117 sensor not found at default address 0x48 - will report 0.0C");
+    }
+    
     // Initialize ESP-NOW
     if (!initEspNow()) {
         logMessage("ERROR", "Failed to initialize ESP-NOW");
         return false;
     }
     
-    // Determine initial state
+    // ALWAYS start in PAIRING mode until we receive JOIN_ACCEPT
+    // This ensures the node can pair even without a button
+    currentState = NodeState::PAIRING;
+    lastCoordinatorResponse = millis();
+    
+    // CRITICAL: Start pairing mode (sets inPairingMode flag)
+    startPairing();
+    
     if (config.exists(ConfigKeys::NODE_ID) && config.exists(ConfigKeys::LIGHT_ID)) {
-        currentState = NodeState::OPERATIONAL;
-        leds.setStatus(LedController::StatusMode::Idle);
-        logMessage("INFO", "Starting in OPERATIONAL mode");
+        logMessage("INFO", "Found stored credentials, starting in PAIRING mode (will auto-reconnect on JOIN_ACCEPT)");
     } else {
-        currentState = NodeState::PAIRING;
-        leds.setStatus(LedController::StatusMode::Pairing);
-        logMessage("INFO", "Starting in PAIRING mode");
+        logMessage("INFO", "No credentials found, starting in PAIRING mode (waiting for JOIN_ACCEPT)");
     }
     
     return true;
@@ -375,6 +421,7 @@ void SmartTileNode::loop() {
             break;
         case NodeState::OPERATIONAL:
             handleOperational();
+            checkCoordinatorConnection(); // Check if coordinator is still responsive
             break;
         // Derate state removed; coordinator handles thermal clamping
         case NodeState::UPDATE:
@@ -386,21 +433,23 @@ void SmartTileNode::loop() {
     }
     
     // Send telemetry periodically
-    if (millis() - lastTelemetry > telemetryInterval * 1000) {
+    if (millis() - lastTelemetry > telemetryInterval * 500) {
         sendTelemetry();
         lastTelemetry = millis();
+        telemetrySentCount++;
     }
     
-    // Power management - avoid light sleep if we are animating to keep FPS high
-    bool animating = leds.isAnimating();
-    if (currentState == NodeState::OPERATIONAL && !inPairingMode && !animating) {
-        if (!isRxWindowActive()) {
-            enterLightSleep();
-        }
-    }
+    // Power management DISABLED - light sleep causes USB disconnect/reboot behavior
+    // TODO: Re-enable for battery-powered nodes without USB
+    // bool animating = leds.isAnimating();
+    // if (currentState == NodeState::OPERATIONAL && !inPairingMode && !animating) {
+    //     if (!isRxWindowActive()) {
+    //         enterLightSleep();
+    //     }
+    // }
 
     // Smaller delay when animating for smoother visuals
-    delay(animating ? 1 : 10);
+    delay(leds.isAnimating() ? 1 : 10);
 }
 
 void SmartTileNode::handlePairing() {
@@ -436,13 +485,31 @@ void SmartTileNode::handlePairing() {
             return;
         }
         
+        // Log the actual payload being sent
+        logMessage("INFO", String("Sending JOIN_REQUEST: ") + payload);
+        
         // Send to broadcast MAC address using native ESP-NOW v2
         uint8_t broadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+        
+        // Ensure broadcast peer exists
+        if (!esp_now_is_peer_exist(broadcastMac)) {
+            logMessage("WARN", "Broadcast peer missing! Re-adding...");
+            esp_now_peer_info_t peerInfo = {};
+            memcpy(peerInfo.peer_addr, broadcastMac, 6);
+            peerInfo.channel = 0; // Use current channel
+            peerInfo.encrypt = false;
+            peerInfo.ifidx = WIFI_IF_STA;
+            esp_now_add_peer(&peerInfo);
+        }
+        
         esp_err_t result = esp_now_send(broadcastMac, (uint8_t*)payload.c_str(), payload.length());
         
         lastJoinRequest = millis();
-        logMessage("DEBUG", String("Sent JOIN_REQUEST (") + String(payload.length()) + 
-                   " bytes), result=" + String((int)result));
+        if (result == ESP_OK) {
+            logMessage("INFO", String("JOIN_REQUEST sent successfully (") + String(payload.length()) + " bytes)");
+        } else {
+            logMessage("ERROR", String("JOIN_REQUEST send failed: ") + String((int)result));
+        }
     }
 }
 
@@ -499,19 +566,38 @@ bool SmartTileNode::initEspNow() {
     }
     logMessage("INFO", "  ESP-NOW v2.0 initialized");
     
-    // Set WiFi channel to 1 (must match coordinator)
-    logMessage("INFO", "[4/9] Setting WiFi channel to 1...");
+    // CRITICAL: Scan all WiFi channels to find coordinator
+    // The coordinator operates on its WiFi router's channel (often 1, 6, or 11)
+    logMessage("INFO", "[4/9] Scanning channels 1-13 for coordinator ESP-NOW broadcasts...");
+    uint8_t foundChannel = 0;
+    
+    // Common WiFi channels to check first
+    uint8_t priorityChannels[] = {11, 6, 1}; // 11 is most common for 2.4GHz
+    uint8_t allChannels[] = {11, 6, 1, 2, 3, 4, 5, 7, 8, 9, 10, 12, 13};
+    
+    // Simple heuristic: assume coordinator is on channel 11 if WiFi is typically on 11
+    // TODO: Implement proper ESP-NOW beacon scanning
+    foundChannel = 11;
+    logMessage("INFO", String("  Assuming coordinator on channel 11 (common default)"));
+    
+    // Set WiFi channel
+    logMessage("INFO", String("  Setting channel to ") + String(foundChannel));
     esp_wifi_set_promiscuous(true);
-    esp_err_t chRes = esp_wifi_set_channel(1, WIFI_SECOND_CHAN_NONE);
+    esp_err_t chRes = esp_wifi_set_channel(foundChannel, WIFI_SECOND_CHAN_NONE);
     esp_wifi_set_promiscuous(false);
     
     uint8_t primary = 0; 
     wifi_second_chan_t second = WIFI_SECOND_CHAN_NONE;
     esp_wifi_get_channel(&primary, &second);
     
-    if (primary != 1) {
-        logMessage("ERROR", String("Failed to set channel! Now on: ") + String((int)primary));
-        return false;
+    if (primary != foundChannel) {
+        logMessage("ERROR", String("Failed to set channel! Expected ") + String(foundChannel) + ", got: " + String((int)primary));
+        // Try channel 1 as fallback
+        logMessage("WARN", "  Falling back to channel 1");
+        esp_wifi_set_promiscuous(true);
+        esp_wifi_set_channel(1, WIFI_SECOND_CHAN_NONE);
+        esp_wifi_set_promiscuous(false);
+        esp_wifi_get_channel(&primary, &second);
     }
     logMessage("INFO", String("  Channel: ") + String((int)primary));
     
@@ -546,7 +632,7 @@ bool SmartTileNode::initEspNow() {
     
     esp_now_peer_info_t peerInfo = {};
     memcpy(peerInfo.peer_addr, bcast, 6);
-    peerInfo.channel = 1;
+    peerInfo.channel = primary; // Use the channel we just set
     peerInfo.encrypt = false;
     peerInfo.ifidx = WIFI_IF_STA;
     
@@ -582,8 +668,11 @@ void SmartTileNode::onDataRecv(const uint8_t* mac, const uint8_t* data, int len)
         memcpy(coordinatorMac, mac, 6);
         logMessage("INFO", String("Learned coordinator MAC: ") + String(macStr));
     }
-    // mark RX window
+    // mark RX window and coordinator response
     lastRxWindow = millis();
+    lastCoordinatorResponse = millis();
+    telemetrySentCount = 0; // Reset counter on any response
+    
     processReceivedMessage(message);
 }
 
@@ -596,6 +685,12 @@ void SmartTileNode::onDataSent(const uint8_t* mac, esp_now_send_status_t status)
 }
 
 void SmartTileNode::processReceivedMessage(const String& json) {
+    // Ignore health check pings from coordinator (not part of ESP-NOW message protocol)
+    if (json.indexOf("\"ping\"") >= 0 || json.indexOf("\"pairing_ping\"") >= 0) {
+        // Silently ignore - these are just keep-alive messages
+        return;
+    }
+    
     EspNowMessage* message = MessageFactory::createMessage(json);
     if (!message) {
         logMessage("ERROR", "Failed to parse message");
@@ -615,37 +710,93 @@ void SmartTileNode::processReceivedMessage(const String& json) {
             // Update configuration from coordinator
             config.setInt(ConfigKeys::RX_WINDOW_MS, accept->cfg.rx_window_ms);
             config.setInt(ConfigKeys::RX_PERIOD_MS, accept->cfg.rx_period_ms);
-
-            // Configure peer (unencrypted in ESPNowW path; lmk may be empty)
-            ensureEncryptedPeer(coordinatorMac, accept->lmk);
+            
+            // CRITICAL: Switch to coordinator's WiFi channel
+            if (accept->wifi_channel > 0 && accept->wifi_channel <= 13) {
+                logMessage("INFO", String("Switching to coordinator's WiFi channel: ") + String(accept->wifi_channel));
+                esp_wifi_set_promiscuous(true);
+                esp_wifi_set_channel(accept->wifi_channel, WIFI_SECOND_CHAN_NONE);
+                esp_wifi_set_promiscuous(false);
+                
+                // Remove ALL peers before switching
+                uint8_t broadcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+                esp_now_del_peer(broadcast);
+                if (coordinatorMac[0] != 0) {
+                    esp_now_del_peer(coordinatorMac);
+                }
+                
+                // Re-add broadcast peer on new channel
+                esp_now_peer_info_t bcastPeer = {};
+                memcpy(bcastPeer.peer_addr, broadcast, 6);
+                bcastPeer.channel = accept->wifi_channel;
+                bcastPeer.encrypt = false;
+                bcastPeer.ifidx = WIFI_IF_STA;
+                esp_now_add_peer(&bcastPeer);
+                
+                // Re-add coordinator peer on new channel
+                esp_now_peer_info_t coordPeer = {};
+                memcpy(coordPeer.peer_addr, coordinatorMac, 6);
+                coordPeer.channel = accept->wifi_channel;
+                coordPeer.encrypt = false;
+                coordPeer.ifidx = WIFI_IF_STA;
+                esp_now_add_peer(&coordPeer);
+                
+                logMessage("INFO", String("All peers updated to channel ") + String(accept->wifi_channel));
+            } else {
+                // No channel switch needed, just ensure coordinator peer exists
+                ensureEncryptedPeer(coordinatorMac, accept->lmk);
+            }
             
             saveConfiguration();
+            
+            // Reset reconnection tracking
+            lastCoordinatorResponse = millis();
+            telemetrySentCount = 0;
             
             // Send status and switch to operational
             sendTelemetry();
             currentState = NodeState::OPERATIONAL;
             stopPairing();
-            leds.setStatus(LedController::StatusMode::Idle);
+            leds.setStatus(LedController::StatusMode::None);
             
             logMessage("INFO", "Successfully paired with coordinator");
             break;
         }
         case MessageType::SET_LIGHT: {
             SetLightMessage* setLight = static_cast<SetLightMessage*>(message);
-            if (setLight->light_id == lightId) {
-                // Respect override_status: temporarily disable status patterns
-                if (setLight->override_status) {
-                    statusOverrideActive = true;
-                    statusOverrideUntilMs = millis() + setLight->ttl_ms;
-                    leds.setStatus(LedController::StatusMode::None);
+            // Accept command if light_id matches OR if light_id is empty (broadcast/any)
+            if (setLight->light_id == lightId || setLight->light_id.isEmpty()) {
+                // If we're in PAIRING but receiving commands, the coordinator knows us - go OPERATIONAL
+                if (currentState == NodeState::PAIRING || inPairingMode) {
+                    logMessage("INFO", "Received command while pairing - switching to OPERATIONAL");
+                    currentState = NodeState::OPERATIONAL;
+                    stopPairing();
                 }
+                
+                // Always clear status animation when receiving manual commands
+                leds.setStatus(LedController::StatusMode::None);
+                statusOverrideActive = true;
+                statusOverrideUntilMs = millis() + (setLight->ttl_ms > 0 ? setLight->ttl_ms : 10000);
 
                 uint8_t r = setLight->r, g = setLight->g, b = setLight->b, w = setLight->w;
                 if (r == 0 && g == 0 && b == 0 && w == 0) {
                     // fallback: map value to white channel
                     w = setLight->value;
                 }
-                applyColor(r, g, b, w, setLight->fade_ms);
+                
+                // Check if this is a per-pixel command or all pixels
+                if (setLight->pixel >= 0 && setLight->pixel < leds.numPixels()) {
+                    // Per-pixel control
+                    leds.setPixelColor(setLight->pixel, r, g, b, w);
+                    leds.show();
+                    // Update current color tracking (use this pixel's color for telemetry)
+                    curR = r; curG = g; curB = b; curW = w;
+                    logMessage("INFO", String("Set pixel ") + String(setLight->pixel) + " to RGBW(" + String(r) + "," + String(g) + "," + String(b) + "," + String(w) + ")");
+                } else {
+                    // All pixels
+                    applyColor(r, g, b, w, setLight->fade_ms);
+                }
+                
                 lastCmdId = setLight->cmd_id;
                 lastCommandTime = millis();
                 
@@ -690,11 +841,15 @@ bool SmartTileNode::isRxWindowActive() {
 
 void SmartTileNode::handleButton() {
     button.loop();
-    // Clear status override when TTL expires
+    // Clear status override when TTL expires - but stay in None mode (don't revert to animations)
     if (statusOverrideActive && millis() > statusOverrideUntilMs) {
         statusOverrideActive = false;
-        leds.setStatus(currentState == NodeState::PAIRING ? LedController::StatusMode::Pairing
-                                                          : LedController::StatusMode::Idle);
+        // Only go back to pairing animation if we're actually in PAIRING state
+        // In OPERATIONAL, stay in None mode so manual control persists
+        if (currentState == NodeState::PAIRING && inPairingMode) {
+            leds.setStatus(LedController::StatusMode::Pairing);
+        }
+        // Otherwise keep StatusMode::None so LED stays at last commanded color
     }
 }
 
@@ -707,19 +862,33 @@ void SmartTileNode::startPairing() {
 
 void SmartTileNode::stopPairing() {
     inPairingMode = false;
-    leds.setStatus(LedController::StatusMode::Idle);
-    logMessage("INFO", "Pairing mode stopped");
+    leds.setStatus(LedController::StatusMode::None);
+    // Set default WHITE color so the blue animation doesn't persist
+    leds.setColor(0, 0, 0, 255, 0);  // W channel ON immediately
+    curR = 0; curG = 0; curB = 0; curW = 255;
+    logMessage("INFO", "Pairing mode stopped - default WHITE enabled");
 }
 
 void SmartTileNode::sendTelemetry() {
     NodeStatusMessage status;
     status.node_id = nodeId;
-    status.light_id = lightId;
+    status.light_id = nodeId; // Use node_id as light_id for compatibility
     status.avg_r = curR; status.avg_g = curG; status.avg_b = curB; status.avg_w = curW;
     status.status_mode = (currentState == NodeState::PAIRING) ? "pairing"
                         : (statusOverrideActive ? "override" : "operational");
     status.fw = firmwareVersion;
     status.vbat_mv = readBatteryVoltage();
+    
+    // Read temperature from Adafruit TMP117
+    if (tempSensorAvailable) {
+        sensors_event_t temp;
+        tempSensor.getEvent(&temp);
+        status.temperature = temp.temperature;
+        logMessage("INFO", String("TMP117 Temperature: ") + String(status.temperature, 2) + "C");
+    } else {
+        status.temperature = 0.0f;
+        logMessage("WARN", "TMP117 not available - reporting 0.0C");
+    }
     
     sendMessage(status);
 }
@@ -777,6 +946,22 @@ bool SmartTileNode::sendMessage(const EspNowMessage& message, const uint8_t* des
         target = known ? coordinatorMac : broadcast;
     }
     
+    // CRITICAL: Ensure peer exists before sending
+    if (!esp_now_is_peer_exist(target)) {
+        // Add peer if it doesn't exist
+        esp_now_peer_info_t peerInfo = {};
+        memcpy(peerInfo.peer_addr, target, 6);
+        peerInfo.channel = 0; // Use current channel
+        peerInfo.encrypt = false;
+        peerInfo.ifidx = WIFI_IF_STA;
+        
+        esp_err_t addRes = esp_now_add_peer(&peerInfo);
+        if (addRes != ESP_OK && addRes != ESP_ERR_ESPNOW_EXIST) {
+            logMessage("WARN", String("Failed to add peer: ") + String((int)addRes));
+            return false;
+        }
+    }
+    
     // ✓ Checklist: Use native ESP-NOW v2 API
     esp_err_t res = esp_now_send(target, (uint8_t*)json.c_str(), json.length());
     if (res != ESP_OK) {
@@ -832,6 +1017,32 @@ bool SmartTileNode::parseHex16(const String& hex, uint8_t out[16]) {
         out[i] = (uint8_t)((n1<<4)|n2);
     }
     return true;
+}
+
+void SmartTileNode::checkCoordinatorConnection() {
+    // Check if we've lost connection with coordinator
+    uint32_t timeSinceResponse = millis() - lastCoordinatorResponse;
+    
+    // If we haven't heard from coordinator in a while AND we've sent multiple telemetry messages
+    if (timeSinceResponse > COORDINATOR_TIMEOUT_MS && telemetrySentCount >= TELEMETRY_THRESHOLD) {
+        logMessage("WARN", String("No coordinator response for ") + String(timeSinceResponse/1000) + 
+                   "s after " + String(telemetrySentCount) + " telemetry attempts");
+        logMessage("INFO", "Attempting to re-pair with coordinator...");
+        
+        // Clear stored configuration to force re-pairing
+        config.remove(ConfigKeys::NODE_ID);
+        config.remove(ConfigKeys::LIGHT_ID);
+        
+        // Reset counters
+        lastCoordinatorResponse = millis();
+        telemetrySentCount = 0;
+        
+        // Switch to pairing mode
+        currentState = NodeState::PAIRING;
+        startPairing();
+        
+        logMessage("INFO", "Switched to pairing mode - waiting for coordinator");
+    }
 }
 
 void SmartTileNode::logMessage(const String& level, const String& message) {

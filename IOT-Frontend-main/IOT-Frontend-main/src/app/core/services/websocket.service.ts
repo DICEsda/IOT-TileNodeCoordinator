@@ -192,6 +192,24 @@ export class WebSocketService {
         this.telemetrySubject.next(telemetryMsg.payload);
         break;
 
+      case 'coord_telemetry':
+      case 'node_telemetry':
+        // Handle coordinator and node telemetry from backend broadcasts
+        this.telemetrySubject.next(data.payload);
+        if (this.env.isDevelopment) {
+          console.log(`[WebSocket] ${data.type}:`, data.payload);
+        }
+        break;
+
+      case 'message':
+        // Handle MQTT-style messages (for subscriptions like mmWave)
+        // These come from WebSocket MQTT bridge and have topic + payload
+        if (this.env.isDevelopment) {
+          console.log(`[WebSocket] MQTT message on topic: ${(data as any).topic}`);
+        }
+        // Re-emit as general message - MQTT service will handle routing
+        break;
+
       case 'presence':
         const presenceMsg = data as WSPresenceMessage;
         this.presenceSubject.next(presenceMsg.payload);

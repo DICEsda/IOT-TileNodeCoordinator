@@ -282,7 +282,7 @@
 
   .bulbs-strip {
     display: grid;
-    grid-template-columns: repeat(6, 1fr);
+    grid-template-columns: repeat(4, 1fr);
     gap: 0.75rem;
     margin-bottom: 1rem;
     width: 100%;
@@ -290,7 +290,7 @@
 
     @media (max-width: 600px) {
       gap: 0.5rem;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(2, 1fr);
     }
 
     .bulb {
@@ -305,6 +305,10 @@
       cursor: pointer;
       transition: all 0.3s ease;
       min-width: 0;
+      --bulb-r: 0;
+      --bulb-g: 0;
+      --bulb-b: 0;
+      --bulb-w: 0;
 
       @media (max-width: 600px) {
         padding: 0.5rem;
@@ -338,21 +342,29 @@
       }
 
       &.on {
-        background: rgba(255, 255, 255, 0.1);
-        box-shadow: 0 0 20px rgba(255, 255, 255, 0.2);
+        background: rgba(var(--bulb-r), var(--bulb-g), var(--bulb-b), 0.1);
+        box-shadow: 0 0 20px rgba(var(--bulb-r), var(--bulb-g), var(--bulb-b), 0.3);
 
         .bulb-indicator {
-          color: #ffffff;
-          filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.8));
+          color: rgb(
+            calc(var(--bulb-r) + var(--bulb-w)),
+            calc(var(--bulb-g) + var(--bulb-w)),
+            calc(var(--bulb-b) + var(--bulb-w))
+          );
+          filter: drop-shadow(0 0 8px rgba(var(--bulb-r), var(--bulb-g), var(--bulb-b), 0.8));
           animation: glow 2s ease-in-out infinite;
         }
 
         .bulb-label {
-          color: #ffffff;
+          color: rgb(
+            calc(200 + var(--bulb-r) * 0.2),
+            calc(200 + var(--bulb-g) * 0.2),
+            calc(200 + var(--bulb-b) * 0.2)
+          );
         }
 
         &:hover {
-          box-shadow: 0 0 30px rgba(255, 255, 255, 0.5);
+          box-shadow: 0 0 30px rgba(var(--bulb-r), var(--bulb-g), var(--bulb-b), 0.5);
         }
       }
     }
@@ -396,3 +408,71 @@
   }
 }
 
+
+.sensor-chart-card {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 300px;
+  transition: all 0.3s ease;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .chart-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+
+    h4 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 600;
+      color: rgba(255, 255, 255, 0.9);
+    }
+
+    .legend {
+      display: flex;
+      gap: 16px;
+      font-size: 13px;
+
+      .legend-item {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: rgba(255, 255, 255, 0.7);
+
+        .legend-color {
+          width: 12px;
+          height: 12px;
+          border-radius: 2px;
+
+          &.temp {
+            background: #94a3b8;
+          }
+
+          &.lux {
+            background: #fbbf24;
+          }
+        }
+      }
+    }
+  }
+
+  .chart-container {
+    flex: 1;
+    position: relative;
+    min-height: 250px;
+
+    canvas {
+      width: 100% !important;
+      height: 100% !important;
+    }
+  }
+}

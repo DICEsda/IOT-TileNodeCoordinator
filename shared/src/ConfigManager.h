@@ -38,7 +38,7 @@ namespace Defaults {
     // Node defaults (from PRD)
     static constexpr int PWM_FREQ_HZ         = 1000;
     static constexpr int PWM_RESOLUTION_BITS = 12;
-    static constexpr int TELEMETRY_INTERVAL_S= 5;
+    static constexpr int TELEMETRY_INTERVAL_S= 1;
     static constexpr int RX_WINDOW_MS        = 20;
     static constexpr int RX_PERIOD_MS        = 100;
     static constexpr float DERATE_START_C    = 70.0f;

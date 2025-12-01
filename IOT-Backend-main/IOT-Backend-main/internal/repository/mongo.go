@@ -31,7 +31,12 @@ func (r *MongoRepository) GetCoordinatorById(id string) (*types.Coordinator, err
 	ctx := context.Background()
 	coll := r.db.Collection("coordinators")
 	coordinator := &types.Coordinator{}
-	if err := coll.FindOne(ctx, bson.M{"_id": id}).Decode(coordinator); err != nil {
+	// Try both _id and coord_id for backwards compatibility
+	filter := bson.M{"$or": []bson.M{
+		{"_id": id},
+		{"coord_id": id},
+	}}
+	if err := coll.FindOne(ctx, filter).Decode(coordinator); err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
 			return nil, fmt.Errorf("coordinator with id %s not found: %w", id, err)
 		}
@@ -112,10 +117,14 @@ func (r *MongoRepository) GetSiteById(id string) (*types.Site, error) {
 
 func (r *MongoRepository) UpsertCoordinator(ctx context.Context, coordinator *types.Coordinator) error {
 	coll := r.db.Collection("coordinators")
+	
+	// Use coord_id as the unique key for matching, not _id
+	filter := bson.M{"coord_id": coordinator.CoordId}
 	update := bson.M{"$set": coordinator}
 	opts := options.Update().SetUpsert(true)
-	if _, err := coll.UpdateOne(ctx, bson.M{"_id": coordinator.Id}, update, opts); err != nil {
-		r.logger.Error("Failed to upsert coordinator", zap.Error(err))
+	
+	if _, err := coll.UpdateOne(ctx, filter, update, opts); err != nil {
+		r.logger.Error("Failed to upsert coordinator", zap.Error(err), zap.String("coord_id", coordinator.CoordId))
 		return err
 	}
 	return nil

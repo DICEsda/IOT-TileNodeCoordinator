@@ -183,7 +183,19 @@ func (h *Handler) websocket(w http.ResponseWriter, r *http.Request) {
 		log.Println("ws upgrade:", err)
 		return
 	}
+	
+	// Register this connection with the broadcaster
+	if h.broadcaster != nil {
+		h.broadcaster.Register(ws)
+		log.Printf("WebSocket client registered with broadcaster")
+	}
+	
 	defer func() {
+		// Unregister from broadcaster
+		if h.broadcaster != nil {
+			h.broadcaster.Unregister(ws)
+			log.Printf("WebSocket client unregistered from broadcaster")
+		}
 		if err := ws.Close(); err != nil {
 			log.Println("ws close:", err)
 		}
@@ -213,12 +225,14 @@ func (h *Handler) websocket(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	// Read loop
+	log.Printf("[WS-DEBUG] Entering read loop for client from %s", r.RemoteAddr)
 	for {
 		_, msg, err := ws.ReadMessage()
 		if err != nil {
 			log.Println("ws read:", err)
 			return
 		}
+		log.Printf("[WS-DEBUG] Received raw message: %s", string(msg))
 		var req struct {
 			Type    string      `json:"type"`
 			Topic   string      `json:"topic"`
@@ -226,9 +240,12 @@ func (h *Handler) websocket(w http.ResponseWriter, r *http.Request) {
 			QoS     byte        `json:"qos"`
 		}
 		if err := json.Unmarshal(msg, &req); err != nil {
+			log.Printf("[WS-DEBUG] Failed to unmarshal message: %v, raw: %s", err, string(msg))
 			_ = writeJSON(map[string]any{"type": "error", "message": "invalid json"})
 			continue
 		}
+
+		log.Printf("[WS-DEBUG] Received type=%s topic=%s", req.Type, req.Topic)
 
 		switch req.Type {
 		case "subscribe":
@@ -295,12 +312,15 @@ func (h *Handler) websocket(w http.ResponseWriter, r *http.Request) {
 				}
 				payloadBytes = b
 			}
+			log.Printf("[WS-DEBUG] Publishing to MQTT: topic=%s qos=%d payload=%s", topic, req.QoS, string(payloadBytes))
 			token := h.mqttClient.Publish(topic, req.QoS, false, payloadBytes)
 			token.Wait()
 			if token.Error() != nil {
+				log.Printf("[WS-ERROR] Failed to publish: %v", token.Error())
 				_ = writeJSON(map[string]any{"type": "error", "message": token.Error().Error()})
 				continue
 			}
+			log.Printf("[WS-DEBUG] Published successfully to: %s", topic)
 			_ = writeJSON(map[string]any{"type": "published", "topic": topic})
 
 		default:

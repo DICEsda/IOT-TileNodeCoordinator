@@ -55,6 +55,10 @@
             <div
               class="bulb"
               [class.on]="bulb.isOn"
+              [style.--bulb-r]="bulb.r"
+              [style.--bulb-g]="bulb.g"
+              [style.--bulb-b]="bulb.b"
+              [style.--bulb-w]="bulb.w"
               (click)="toggleBulb(node.id, bulb.id)">
               <div class="bulb-indicator">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
@@ -67,34 +71,31 @@
         </div>
 
         <div class="node-footer">
-          <span class="count-label">{{ node.totalOn }}/6 Active</span>
+          <span class="count-label">{{ node.totalOn }}/{{ node.bulbs.length }} Active</span>
           <div class="progress-bar">
-            <div class="progress-fill" [style.width.%]="(node.totalOn / 6) * 100"></div>
+            <div class="progress-fill" [style.width.%]="(node.totalOn / node.bulbs.length) * 100"></div>
           </div>
         </div>
       </div>
     }
 
-    <!-- Pair More Nodes Card -->
-    <div class="pair-card card">
-      <div class="pair-card-content">
-        <div class="pair-icon">
-          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="10"/>
-            <line x1="12" y1="8" x2="12" y2="16"/>
-            <line x1="8" y1="12" x2="16" y2="12"/>
-          </svg>
+    <!-- Sensor Chart Card -->
+    <div class="sensor-chart-card card">
+      <div class="chart-header">
+        <h4>Coordinator Sensors</h4>
+        <div class="legend">
+          <div class="legend-item">
+            <span class="legend-color temp"></span>
+            <span>Temperature (°C)</span>
+          </div>
+          <div class="legend-item">
+            <span class="legend-color lux"></span>
+            <span>Light (lux)</span>
+          </div>
         </div>
-        <div class="pair-text">
-          <h4>Pair More Nodes</h4>
-          <p>Add additional smart light nodes to expand your control</p>
-        </div>
-        <button class="pair-btn">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>
-          </svg>
-          Start Pairing
-        </button>
+      </div>
+      <div class="chart-container">
+        <canvas #sensorChart></canvas>
       </div>
     </div>
   </div>

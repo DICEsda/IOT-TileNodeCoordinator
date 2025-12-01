@@ -353,6 +353,39 @@ bool EspNow::sendLightCommand(const String& nodeId, uint8_t brightness, uint16_t
     return ok;
 }
 
+bool EspNow::sendColorCommand(const String& nodeId, uint8_t r, uint8_t g, uint8_t b, uint8_t w, uint16_t fadeMs, bool overrideStatus, uint16_t ttlMs, int8_t pixel) {
+    uint8_t mac[6];
+    if (!macStringToBytes(nodeId, mac)) {
+        Logger::warn("sendColorCommand: invalid MAC string %s", nodeId.c_str());
+        return false;
+    }
+
+    SetLightMessage msg;
+    char cmdIdBuf[32];
+    snprintf(cmdIdBuf, sizeof(cmdIdBuf), "%lu-%02X%02X%02X", 
+             (unsigned long)millis(), mac[3], mac[4], mac[5]);
+    msg.cmd_id = cmdIdBuf;
+    msg.light_id = "";
+    msg.r = r;
+    msg.g = g;
+    msg.b = b;
+    msg.w = w;
+    msg.fade_ms = fadeMs;
+    msg.override_status = overrideStatus;
+    msg.ttl_ms = ttlMs;
+    msg.pixel = pixel;
+
+    String json = msg.toJson();
+    bool ok = sendToMac(mac, json);
+    if (!ok) {
+        Logger::warn("sendColorCommand: failed to deliver to %s", nodeId.c_str());
+    } else {
+        Logger::info("sendColorCommand sent %s -> %s RGBW(%d,%d,%d,%d) pixel=%d", 
+                     msg.cmd_id.c_str(), nodeId.c_str(), r, g, b, w, pixel);
+    }
+    return ok;
+}
+
 bool EspNow::broadcastPairingMessage() {
     // Placeholder broadcast
     return true;

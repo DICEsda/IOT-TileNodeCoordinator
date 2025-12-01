@@ -24,39 +24,40 @@ void setup() {
     Logger::info("*** BOOT START ***");
     Serial.flush();
     
-    // Initialize NVS - Critical for Preferences and WiFi
+    // Initialize NVS - only erase if needed
     Logger::info("Initializing NVS flash...");
     Serial.println("Initializing NVS...");
     
-    // Try to initialize NVS first
     esp_err_t ret = nvs_flash_init();
     
+    // Only erase if corrupted
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        // NVS partition was truncated and needs to be erased
-        Logger::warn("NVS partition needs to be erased (error: %s)", esp_err_to_name(ret));
-        Serial.println("Erasing NVS partition...");
-        ret = nvs_flash_erase();
-        if (ret != ESP_OK) {
-            Logger::error("✗ NVS erase failed: 0x%x (%s)", ret, esp_err_to_name(ret));
-            Serial.printf("✗ NVS erase failed: 0x%x\n", ret);
-        }
-        delay(500);
-        
-        // Retry init
+        Serial.println("NVS needs recovery, erasing...");
+        nvs_flash_erase();
+        delay(300);
         ret = nvs_flash_init();
     }
     
     if (ret == ESP_OK) {
         Logger::info("✓ NVS initialized successfully");
         Serial.println("✓ NVS initialized successfully");
+    } else if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        Logger::warn("NVS needs recovery, erasing again...");
+        nvs_flash_erase();
+        delay(300);
+        ret = nvs_flash_init();
+        if (ret == ESP_OK) {
+            Logger::info("✓ NVS recovered and initialized");
+            Serial.println("✓ NVS recovered and initialized");
+        } else {
+            Logger::error("✗ NVS recovery failed: 0x%x", ret);
+        }
     } else {
         Logger::error("✗ NVS init failed: 0x%x (%s)", ret, esp_err_to_name(ret));
-        Serial.printf("✗ NVS init failed: 0x%x (%s)\n", ret, esp_err_to_name(ret));
-        Serial.println("WARNING: System will continue but data persistence may not work!");
+        Serial.printf("✗ NVS failed: 0x%x (%s)\n", ret, esp_err_to_name(ret));
     }
-    
     Serial.flush();
-    delay(1000); // Allow NVS to fully stabilize before using Preferences
+    delay(1000); // Critical: Wait for NVS to fully stabilize
     
     Logger::info("*** SETUP START ***");
     Serial.println("Starting Coordinator...");

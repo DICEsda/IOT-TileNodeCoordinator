@@ -27,9 +27,8 @@ import { MmwaveFrame, MmwaveTarget } from '../../../../core/models/api.models';
       display: flex;
       align-items: center;
       justify-content: center;
-      background: var(--bg-primary);
-      border-radius: 8px;
-      overflow: hidden;
+      background: transparent;
+      overflow: visible;
     }
     
     .radar-canvas {
@@ -94,7 +93,14 @@ export class Radar2DComponent implements OnInit, OnDestroy, AfterViewInit {
   private readonly HEIGHT = 600;
   
   private latestFrame: MmwaveFrame | null = null;
-  private sweepAngle = -60; // Start at -60 degrees
+  private waveRadius = 0; // Wave emanating from center
+  private waveOpacity = 1; // Fade out as wave expands
+  
+  // Smoothing & filtering
+  private smoothedTargets: Map<number, {x: number[], y: number[], distance: number[]}> = new Map();
+  private readonly SMOOTHING_WINDOW = 5; // Average over last 5 frames
+  private lastUpdateTime = 0;
+  private readonly UPDATE_THROTTLE_MS = 50; // Only update every 50ms (20Hz max)
 
   constructor(private mqtt: MqttService) {}
 
@@ -123,10 +129,61 @@ export class Radar2DComponent implements OnInit, OnDestroy, AfterViewInit {
     const subject = this.mqtt.subscribeCoordinatorMmwave(this.siteId(), this.coordinatorId());
     this.mqttSubscription = subject.subscribe({
       next: (payload) => {
-        this.latestFrame = this.normalizeFrame(payload);
+        // Throttle updates to avoid overwhelming the UI
+        const now = Date.now();
+        if (now - this.lastUpdateTime < this.UPDATE_THROTTLE_MS) {
+          return;
+        }
+        this.lastUpdateTime = now;
+        
+        const frame = this.normalizeFrame(payload);
+        
+        // Apply smoothing to targets
+        if (frame.targets.length > 0) {
+          frame.targets = this.smoothTargets(frame.targets);
+        }
+        
+        this.latestFrame = frame;
         this.presenceDetected = this.latestFrame.presence;
         this.targetCount = this.latestFrame.targets.length;
       }
+    });
+  }
+  
+  private smoothTargets(targets: MmwaveTarget[]): MmwaveTarget[] {
+    return targets.map(target => {
+      const id = target.id;
+      
+      // Get or create smoothing buffer for this target
+      if (!this.smoothedTargets.has(id)) {
+        this.smoothedTargets.set(id, { x: [], y: [], distance: [] });
+      }
+      
+      const buffer = this.smoothedTargets.get(id)!;
+      
+      // Add new values
+      buffer.x.push(target.position_x_mm);
+      buffer.y.push(target.position_y_mm);
+      buffer.distance.push(target.distance_mm);
+      
+      // Keep only last N frames
+      if (buffer.x.length > this.SMOOTHING_WINDOW) {
+        buffer.x.shift();
+        buffer.y.shift();
+        buffer.distance.shift();
+      }
+      
+      // Calculate moving average
+      const avgX = buffer.x.reduce((a, b) => a + b, 0) / buffer.x.length;
+      const avgY = buffer.y.reduce((a, b) => a + b, 0) / buffer.y.length;
+      const avgDist = buffer.distance.reduce((a, b) => a + b, 0) / buffer.distance.length;
+      
+      return {
+        ...target,
+        position_x_mm: avgX,
+        position_y_mm: avgY,
+        distance_mm: avgDist
+      };
     });
   }
 
@@ -177,11 +234,14 @@ export class Radar2DComponent implements OnInit, OnDestroy, AfterViewInit {
     // Draw range circles
     this.drawRangeCircles(cx, cy, scale);
     
+    // Draw detection zone (2m-3m)
+    this.drawDetectionZone(cx, cy, scale);
+    
     // Draw radial lines
     this.drawRadialLines(cx, cy, scale);
     
-    // Draw sweep line (animated)
-    this.drawSweepLine(cx, cy, scale);
+    // Draw wave (animated)
+    this.drawWave(cx, cy, scale);
     
     // Draw radar sensor
     this.drawRadarSensor(cx, cy);
@@ -191,9 +251,17 @@ export class Radar2DComponent implements OnInit, OnDestroy, AfterViewInit {
       this.drawTargets(cx, cy, scale, this.latestFrame.targets);
     }
     
-    // Update sweep angle
-    this.sweepAngle += 2;
-    if (this.sweepAngle > 60) this.sweepAngle = -60;
+    // Update wave animation (slower, smoother)
+    this.waveRadius += 1.2;
+    const maxRadius = this.DETECTION_RANGE_M * scale;
+    if (this.waveRadius > maxRadius) {
+      this.waveRadius = 0;
+      this.waveOpacity = 1;
+    } else {
+      // Smoother fade with quadratic easing
+      const progress = this.waveRadius / maxRadius;
+      this.waveOpacity = 1 - (progress * progress);
+    }
   }
 
   private drawDetectionCone(cx: number, cy: number, scale: number): void {
@@ -248,6 +316,62 @@ export class Radar2DComponent implements OnInit, OnDestroy, AfterViewInit {
     }
   }
 
+  private drawDetectionZone(cx: number, cy: number, scale: number): void {
+    // Detection zone: 2m to 3m, ±1m width (total 2m width at center)
+    const innerRadius = 2 * scale; // 2 meters
+    const outerRadius = 3 * scale; // 3 meters
+    const halfAngle = (this.DETECTION_ANGLE_DEG / 2) * Math.PI / 180;
+    
+    // Calculate the angular width for ±1m at the center of the zone (2.5m)
+    const zoneCenter = 2.5 * scale;
+    const halfWidth = 1 * scale; // ±1m = 2m total width
+    const angularWidth = Math.atan(halfWidth / zoneCenter); // angle in radians
+    
+    // Draw filled zone with semi-transparent green
+    const gradient = this.ctx.createRadialGradient(cx, cy, innerRadius, cx, cy, outerRadius);
+    gradient.addColorStop(0, 'rgba(34, 197, 94, 0.15)'); // green-500 with transparency
+    gradient.addColorStop(0.5, 'rgba(34, 197, 94, 0.2)');
+    gradient.addColorStop(1, 'rgba(34, 197, 94, 0.15)');
+    
+    this.ctx.fillStyle = gradient;
+    this.ctx.beginPath();
+    this.ctx.arc(cx, cy, outerRadius, -Math.PI/2 - angularWidth, -Math.PI/2 + angularWidth);
+    this.ctx.arc(cx, cy, innerRadius, -Math.PI/2 + angularWidth, -Math.PI/2 - angularWidth, true);
+    this.ctx.closePath();
+    this.ctx.fill();
+    
+    // Draw borders of the zone
+    this.ctx.strokeStyle = 'rgba(34, 197, 94, 0.5)'; // green-500
+    this.ctx.lineWidth = 2;
+    
+    // Inner arc
+    this.ctx.beginPath();
+    this.ctx.arc(cx, cy, innerRadius, -Math.PI/2 - angularWidth, -Math.PI/2 + angularWidth);
+    this.ctx.stroke();
+    
+    // Outer arc
+    this.ctx.beginPath();
+    this.ctx.arc(cx, cy, outerRadius, -Math.PI/2 - angularWidth, -Math.PI/2 + angularWidth);
+    this.ctx.stroke();
+    
+    // Side lines
+    this.ctx.beginPath();
+    this.ctx.moveTo(cx + innerRadius * Math.sin(-angularWidth), cy - innerRadius * Math.cos(-angularWidth));
+    this.ctx.lineTo(cx + outerRadius * Math.sin(-angularWidth), cy - outerRadius * Math.cos(-angularWidth));
+    this.ctx.stroke();
+    
+    this.ctx.beginPath();
+    this.ctx.moveTo(cx + innerRadius * Math.sin(angularWidth), cy - innerRadius * Math.cos(angularWidth));
+    this.ctx.lineTo(cx + outerRadius * Math.sin(angularWidth), cy - outerRadius * Math.cos(angularWidth));
+    this.ctx.stroke();
+    
+    // Add label
+    this.ctx.fillStyle = 'rgba(34, 197, 94, 0.8)';
+    this.ctx.font = 'bold 12px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+    this.ctx.textAlign = 'center';
+    this.ctx.fillText('DETECTION ZONE', cx, cy - zoneCenter - 15);
+  }
+
   private drawRadialLines(cx: number, cy: number, scale: number): void {
     const angles = [-60, -45, -30, 0, 30, 45, 60];
     const radius = this.DETECTION_RANGE_M * scale;
@@ -264,23 +388,30 @@ export class Radar2DComponent implements OnInit, OnDestroy, AfterViewInit {
     });
   }
 
-  private drawSweepLine(cx: number, cy: number, scale: number): void {
-    const angle = (this.sweepAngle - 90) * Math.PI / 180;
-    const radius = this.DETECTION_RANGE_M * scale;
+  private drawWave(cx: number, cy: number, scale: number): void {
+    if (this.waveRadius <= 0) return;
 
-    // Gradient sweep line
-    const gradient = this.ctx.createLinearGradient(
-      cx, cy,
-      cx + radius * Math.cos(angle), cy + radius * Math.sin(angle)
-    );
-    gradient.addColorStop(0, 'rgba(255, 255, 255, 0.3)');
-    gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    const halfAngle = (this.DETECTION_ANGLE_DEG / 2) * Math.PI / 180;
+    
+    // Outer glow (widest, most subtle)
+    this.ctx.strokeStyle = `rgba(255, 255, 255, ${this.waveOpacity * 0.08})`;
+    this.ctx.lineWidth = 20;
+    this.ctx.beginPath();
+    this.ctx.arc(cx, cy, this.waveRadius, -Math.PI/2 - halfAngle, -Math.PI/2 + halfAngle);
+    this.ctx.stroke();
 
-    this.ctx.strokeStyle = gradient;
+    // Middle glow
+    this.ctx.strokeStyle = `rgba(255, 255, 255, ${this.waveOpacity * 0.15})`;
+    this.ctx.lineWidth = 10;
+    this.ctx.beginPath();
+    this.ctx.arc(cx, cy, this.waveRadius, -Math.PI/2 - halfAngle, -Math.PI/2 + halfAngle);
+    this.ctx.stroke();
+    
+    // Inner bright wave line
+    this.ctx.strokeStyle = `rgba(255, 255, 255, ${this.waveOpacity * 0.4})`;
     this.ctx.lineWidth = 2;
     this.ctx.beginPath();
-    this.ctx.moveTo(cx, cy);
-    this.ctx.lineTo(cx + radius * Math.cos(angle), cy + radius * Math.sin(angle));
+    this.ctx.arc(cx, cy, this.waveRadius, -Math.PI/2 - halfAngle, -Math.PI/2 + halfAngle);
     this.ctx.stroke();
   }
 

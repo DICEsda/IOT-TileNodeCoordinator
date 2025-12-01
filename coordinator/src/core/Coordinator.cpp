@@ -252,16 +252,19 @@ bool Coordinator::begin() {
 
     // Initialize onboard status LED
     statusLed.begin();
+    delay(50);  // Give RMT driver time to initialize
     
     // Test pattern: cycle through all pixels briefly to verify SK6812B strip is working
-    Logger::info("Testing SK6812B strip (%d pixels)...", Pins::RgbLed::NUM_PIXELS);
-    for (uint8_t i = 0; i < Pins::RgbLed::NUM_PIXELS; ++i) {
-        statusLed.clear();
-        statusLed.setPixel(i, 0, 100, 0); // green
-        statusLed.show();
-        delay(100);
-    }
-    statusLed.clear();
+    // Temporarily disabled due to ESP32-S3 RMT/WiFi conflict
+    // Logger::info("Testing SK6812B strip (%d pixels)...", Pins::RgbLed::NUM_PIXELS);
+    // for (uint8_t i = 0; i < Pins::RgbLed::NUM_PIXELS; ++i) {
+    //     statusLed.clear();
+    //     statusLed.setPixel(i, 0, 100, 0); // green
+    //     statusLed.show();
+    //     delay(100);
+    // }
+    // statusLed.clear();
+    Logger::info("SK6812B strip initialized (test pattern skipped)");;
     
     // Initialize LED group mapping containers (4 pixels per group)
     int groupCount = Pins::RgbLed::NUM_PIXELS / 4;
@@ -406,20 +409,25 @@ void Coordinator::onMmWaveEvent(const MmWaveEvent& event) {
     // Publish raw mmWave frame to MQTT for backend/frontend consumption
     mqtt->publishMmWaveEvent(event);
 
-    // Process presence detection
-    auto affectedLights = zones->getLightsForZone(event.sensorId);
-    for (const auto& lightId : affectedLights) {
-        auto nodeId = nodes->getNodeForLight(lightId);
-        if (!nodeId.isEmpty()) {
-            // Check thermal status before setting brightness
-            uint8_t maxBrightness = thermal->getNodeDerationLevel(nodeId);
-            uint8_t targetBrightness = event.presence ? maxBrightness : 0;
-            
-            // Send command through ESP-NOW
-            espNow->sendLightCommand(nodeId, targetBrightness);
+    // Only send lighting commands when zone state CHANGES (not every frame)
+    // This prevents flickering and allows manual control when out of zone
+    if (event.zoneOccupied != zoneOccupiedState) {
+        zoneOccupiedState = event.zoneOccupied;
+        
+        auto allNodes = nodes->getAllNodes();
+        for (const auto& nodeInfo : allNodes) {
+            if (zoneOccupiedState) {
+                // Just entered zone: turn all node LEDs GREEN
+                espNow->sendColorCommand(nodeInfo.nodeId, 0, 255, 0, 0, 200); // Green, 200ms fade
+                Logger::info("ENTERED ZONE - sending GREEN to node %s", nodeInfo.nodeId.c_str());
+            } else {
+                // Just left zone: turn off LEDs (available for manual control)
+                espNow->sendColorCommand(nodeInfo.nodeId, 0, 0, 0, 0, 200); // Off, 200ms fade
+                Logger::info("LEFT ZONE - turning off node %s (manual control available)", nodeInfo.nodeId.c_str());
+            }
             
             // Publish state change to MQTT
-            mqtt->publishLightState(lightId, targetBrightness);
+            mqtt->publishLightState(nodeInfo.lightId, zoneOccupiedState ? 255 : 0);
         }
     }
 }
@@ -478,31 +486,48 @@ void Coordinator::handleNodeMessage(const String& nodeId, const uint8_t* data, s
     String payload((const char*)data, len);
     MessageType mt = MessageFactory::getMessageType(payload);
 
-    // Re-accept known node JOIN_REQUEST even if pairing window is closed
+    // Auto-accept any node JOIN_REQUEST (no formal pairing required)
     if (mt == MessageType::JOIN_REQUEST && nodes) {
-        // nodeId is the MAC string
+        // nodeId is the MAC string - add as peer first
+        uint8_t mac[6];
+        if (EspNow::macStringToBytes(nodeId, mac)) {
+            espNow->addPeer(mac);
+        }
+        
+        // Auto-register if not already known
         String existingLight = nodes->getLightForNode(nodeId);
-        if (existingLight.length() > 0 || nodes->getNodeStatus(nodeId).nodeId.length() > 0) {
-            // Known node: respond with join_accept
-            uint8_t mac[6];
-            if (EspNow::macStringToBytes(nodeId, mac)) {
-                espNow->addPeer(mac);
-            }
-            JoinAcceptMessage accept;
-            accept.node_id = nodeId;
-            accept.light_id = nodes->getLightForNode(nodeId);
-            accept.lmk = "";
-            accept.cfg.rx_window_ms = 20;
-            accept.cfg.rx_period_ms = 100;
-            String json = accept.toJson();
-            // Parse MAC for send
-            uint8_t mac2[6];
-            if (EspNow::macStringToBytes(nodeId, mac2)) {
-                if (!espNow->sendToMac(mac2, json)) {
-                    Logger::warn("Failed to send re-join_accept to %s", nodeId.c_str());
-                } else {
-                    Logger::info("Re-accepted known node %s", nodeId.c_str());
-                }
+        if (existingLight.length() == 0) {
+            // Generate light ID from MAC last 3 bytes
+            char lightIdBuf[16];
+            snprintf(lightIdBuf, sizeof(lightIdBuf), "L%s", nodeId.substring(nodeId.length() - 8).c_str());
+            // Remove colons
+            String lightId = String(lightIdBuf);
+            lightId.replace(":", "");
+            nodes->registerNode(nodeId, lightId);
+            existingLight = lightId;
+            Logger::info("Auto-registered node %s as %s", nodeId.c_str(), lightId.c_str());
+        }
+        
+        // Always respond with join_accept
+        JoinAcceptMessage accept;
+        accept.node_id = nodeId;
+        accept.light_id = existingLight;
+        accept.lmk = "";
+        // CRITICAL: Include current WiFi channel so node can switch
+        uint8_t currentChannel = 1;
+        wifi_second_chan_t second = WIFI_SECOND_CHAN_NONE;
+        esp_wifi_get_channel(&currentChannel, &second);
+        accept.wifi_channel = currentChannel;
+        accept.cfg.rx_window_ms = 20;
+        accept.cfg.rx_period_ms = 100;
+        String json = accept.toJson();
+        
+        uint8_t mac2[6];
+        if (EspNow::macStringToBytes(nodeId, mac2)) {
+            if (!espNow->sendToMac(mac2, json)) {
+                Logger::warn("Failed to send join_accept to %s", nodeId.c_str());
+            } else {
+                Logger::info("Sent join_accept to %s", nodeId.c_str());
             }
         }
     }
@@ -809,6 +834,17 @@ void Coordinator::handleMqttCommand(const String& topic, const String& payload) 
 
     String cmd = doc["cmd"] | "";
     cmd.toLowerCase();
+    
+    // Extract nodeId from topic if it's a node command (site/{siteId}/node/{nodeId}/cmd)
+    String nodeId = "";
+    if (topic.indexOf("/node/") >= 0) {
+        int nodeStart = topic.indexOf("/node/") + 6;
+        int nodeEnd = topic.indexOf("/", nodeStart);
+        if (nodeEnd > nodeStart) {
+            nodeId = topic.substring(nodeStart, nodeEnd);
+        }
+    }
+    
     if (cmd == "pair" || cmd == "pairing.start" || cmd == "enter_pairing_mode") {
         uint32_t windowMs = doc["duration_ms"] | 60000;
         startPairingWindow(windowMs, "mqtt");
@@ -817,6 +853,30 @@ void Coordinator::handleMqttCommand(const String& topic, const String& payload) 
         if (espNow) espNow->disablePairingMode();
         Logger::info("Pairing window closed via MQTT command");
         Serial.println("Pairing window closed via MQTT command");
+    } else if (cmd == "set_light" && nodeId.length() > 0) {
+        // Forward set_light command to node via ESP-NOW
+        uint8_t r = doc["r"] | 0;
+        uint8_t g = doc["g"] | 0;
+        uint8_t b = doc["b"] | 0;
+        uint8_t w = doc["w"] | 0;
+        uint16_t fadeMs = doc["fade_ms"] | 200;
+        int8_t pixel = doc["pixel"] | -1;
+        bool overrideStatus = doc["override"] | false;
+        uint16_t ttlMs = doc["ttl_ms"] | 1500;
+        
+        Logger::info("set_light -> node=%s RGBW(%d,%d,%d,%d) pixel=%d fade=%dms",
+                     nodeId.c_str(), r, g, b, w, pixel, fadeMs);
+        
+        if (espNow) {
+            bool sent = espNow->sendColorCommand(nodeId, r, g, b, w, fadeMs, overrideStatus, ttlMs, pixel);
+            if (sent) {
+                Logger::info("  ✓ ESP-NOW sent to %s", nodeId.c_str());
+            } else {
+                Logger::warn("  ✗ ESP-NOW failed to %s", nodeId.c_str());
+            }
+        } else {
+            Logger::error("ESP-NOW not initialized, cannot send to node");
+        }
     } else if (cmd == "led.set") {
         manualR = doc["r"] | 0;
         manualG = doc["g"] | 0;

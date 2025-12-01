@@ -55,15 +55,16 @@ export class DataService implements OnDestroy {
     this.destroy$.next();
     this.destroy$.complete();
     this.ws.disconnect();
-    this.mqtt.disconnect();
+    // this.mqtt.disconnect(); // Not used - WebSocket only
   }
 
   /**
    * Initialize the service
    */
   private initialize(): void {
-    // Connect to real-time services (using MQTT WebSocket bridge only)
-    // this.ws.connect(); // Disabled - duplicates MQTT connection
+    // Connect to WebSocket for telemetry broadcasts
+    this.ws.connect();
+    // Connect to MQTT for topic subscriptions (mmWave, etc.)
     this.mqtt.connect();
 
     // Subscribe to WebSocket telemetry
@@ -90,7 +91,7 @@ export class DataService implements OnDestroy {
     // Monitor connection states
     setInterval(() => {
       this.wsConnected.set(this.ws.connected());
-      this.mqttConnected.set(this.mqtt.connected());
+      this.mqttConnected.set(this.ws.connected()); // Show WS status as MQTT too
     }, 1000);
 
     // Periodic health check
@@ -194,44 +195,39 @@ export class DataService implements OnDestroy {
     }
     this.subscribedSites.add(siteId);
 
-    // Subscribe to all node telemetry
-    this.mqtt.subscribeAllNodesTelemetry(siteId)
-      .pipe(takeUntil(this.destroy$))
-      .subscribe(telemetry => {
-        if (this.env.isDevelopment) {
-          console.log('[DataService] Node telemetry:', telemetry);
-        }
-        this.handleTelemetry(telemetry);
-      });
+    // MQTT subscriptions disabled - WebSocket handles all telemetry
+    // this.mqtt.subscribeAllNodesTelemetry(siteId)
+    //   .pipe(takeUntil(this.destroy$))
+    //   .subscribe(telemetry => {
+    //     if (this.env.isDevelopment) {
+    //       console.log('[DataService] Node telemetry:', telemetry);
+    //     }
+    //     this.handleTelemetry(telemetry);
+    //   });
 
-    // Subscribe to coordinator telemetry
-    // We use messages$ stream to get the topic, as the payload might not contain the ID
-    this.mqtt.messages$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe(msg => {
-        console.log('[DataService] MQTT message received:', msg.topic, msg.payload);
-        // Check if it matches coordinator telemetry pattern: site/{siteId}/coord/{coordId}/telemetry
-        const parts = msg.topic.split('/');
-        if (parts.length === 5 && parts[0] === 'site' && parts[1] === siteId && parts[2] === 'coord' && parts[4] === 'telemetry') {
-          const coordId = parts[3];
-          const telemetry = { ...msg.payload, coord_id: coordId };
-          console.log('[DataService] Coordinator telemetry received:', telemetry);
-          this.handleTelemetry(telemetry);
-        }
-      });
+    // this.mqtt.messages$
+    //   .pipe(takeUntil(this.destroy$))
+    //   .subscribe(msg => {
+    //     console.log('[DataService] MQTT message received:', msg.topic, msg.payload);
+    //     const parts = msg.topic.split('/');
+    //     if (parts.length === 5 && parts[0] === 'site' && parts[1] === siteId && parts[2] === 'coord' && parts[4] === 'telemetry') {
+    //       const coordId = parts[3];
+    //       const telemetry = { ...msg.payload, coord_id: coordId };
+    //       console.log('[DataService] Coordinator telemetry received:', telemetry);
+    //       this.handleTelemetry(telemetry);
+    //     }
+    //   });
     
-    // Ensure subscription is active
-    this.mqtt.subscribeCoordinatorTelemetry(siteId, '+');
+    // this.mqtt.subscribeCoordinatorTelemetry(siteId, '+');
 
-    // Subscribe to pairing requests
-    this.mqtt.subscribePairingRequests(siteId)
-      .pipe(takeUntil(this.destroy$))
-      .subscribe(pairing => {
-        console.log('[DataService] Pairing request:', pairing);
-      });
+    // this.mqtt.subscribePairingRequests(siteId)
+    //   .pipe(takeUntil(this.destroy$))
+    //   .subscribe(pairing => {
+    //     console.log('[DataService] Pairing request:', pairing);
+    //   });
 
     if (this.env.isDevelopment) {
-      console.log('[DataService] Subscribed to site telemetry:', siteId);
+      console.log('[DataService] Site telemetry via WebSocket only:', siteId);
     }
   }
 
@@ -275,15 +271,15 @@ export class DataService implements OnDestroy {
         });
       });
 
-      // Also send via MQTT for immediate response
-      if (this.mqtt.connected()) {
-        this.mqtt.sendNodeCommand(command.site_id, command.node_id, {
-          type: 'set_light',
-          rgbw: command.rgbw,
-          brightness: command.brightness,
-          fade_duration: command.fade_duration || 500
-        });
-      }
+      // Commands are sent via API, backend will publish to MQTT
+      // if (this.mqtt.connected()) {
+      //   this.mqtt.sendNodeCommand(command.site_id, command.node_id, {
+      //     type: 'set_light',
+      //     rgbw: command.rgbw,
+      //     brightness: command.brightness,
+      //     fade_duration: command.fade_duration || 500
+      //   });
+      // }
 
       if (this.env.isDevelopment) {
         console.log('[DataService] Set light:', command);
@@ -295,40 +291,67 @@ export class DataService implements OnDestroy {
   }
 
   /**
+   * Send direct command to node via MQTT (for per-pixel control)
+   */
+  sendNodeCommand(nodeId: string, command: any): void {
+    console.log('[DataService] sendNodeCommand called:', nodeId, command);
+    const siteId = this.activeSiteId() || 'site001';
+    console.log('[DataService] siteId:', siteId, 'mqtt.connected():', this.mqtt.connected());
+    
+    if (this.mqtt.connected()) {
+      console.log('[DataService] About to call mqtt.sendNodeCommand...');
+      this.mqtt.sendNodeCommand(siteId, nodeId, command);
+      console.log('[DataService] mqtt.sendNodeCommand called successfully');
+      
+      if (this.env.isDevelopment) {
+        console.log('[DataService] Sent node command:', nodeId, command);
+      }
+    } else {
+      console.warn('[DataService] MQTT not connected, cannot send command');
+    }
+  }
+
+  /**
    * Control coordinator light
    */
   async setCoordinatorLight(siteId: string, coordId: string, rgb: { r: number, g: number, b: number }): Promise<void> {
-    if (this.mqtt.connected()) {
-      this.mqtt.sendCoordinatorCommand(siteId, coordId, {
-        cmd: 'led.set',
-        r: rgb.r,
-        g: rgb.g,
-        b: rgb.b
-      });
-    }
+    // Commands go via API/WebSocket, not direct MQTT
+    // if (this.mqtt.connected()) {
+    //   this.mqtt.sendCoordinatorCommand(siteId, coordId, {
+    //     cmd: 'led.set',
+    //     r: rgb.r,
+    //     g: rgb.g,
+    //     b: rgb.b
+    //   });
+    // }
+    console.warn('[DataService] setCoordinatorLight not implemented via WebSocket');
   }
 
   /**
    * Reset coordinator light
    */
   async resetCoordinatorLight(siteId: string, coordId: string): Promise<void> {
-    if (this.mqtt.connected()) {
-      this.mqtt.sendCoordinatorCommand(siteId, coordId, {
-        cmd: 'led.reset'
-      });
-    }
+    // Commands go via API/WebSocket, not direct MQTT
+    // if (this.mqtt.connected()) {
+    //   this.mqtt.sendCoordinatorCommand(siteId, coordId, {
+    //     cmd: 'led.reset'
+    //   });
+    // }
+    console.warn('[DataService] resetCoordinatorLight not implemented via WebSocket');
   }
 
   /**
    * Start pairing mode on coordinator
    */
   async startPairing(siteId: string, coordId: string, durationMs: number = 60000): Promise<void> {
-    if (this.mqtt.connected()) {
-      this.mqtt.sendCoordinatorCommand(siteId, coordId, {
-        cmd: 'pair',
-        duration_ms: durationMs
-      });
-    }
+    // Commands go via API/WebSocket, not direct MQTT
+    // if (this.mqtt.connected()) {
+    //   this.mqtt.sendCoordinatorCommand(siteId, coordId, {
+    //     cmd: 'pair',
+    //     duration_ms: durationMs
+    //   });
+    // }
+    console.warn('[DataService] startPairing not implemented via WebSocket');
   }
 
   /**
@@ -397,7 +420,18 @@ export class DataService implements OnDestroy {
        // console.log('[DataService] Telemetry received:', telemetry);
     }
 
-    if ('node_id' in telemetry) {
+    // Handle both snake_case (nodeId) and camelCase (node_id) from WebSocket
+    if ('nodeId' in telemetry) {
+      telemetry.node_id = telemetry.nodeId;
+    }
+    if ('coordId' in telemetry) {
+      telemetry.coord_id = telemetry.coordId;
+    }
+    if ('siteId' in telemetry) {
+      telemetry.site_id = telemetry.siteId;
+    }
+
+    if ('node_id' in telemetry && !('coord_id' in telemetry)) {
       console.log('[DataService] Processing node telemetry for:', telemetry.node_id);
       // Node telemetry
       const currentTelemetry = new Map(this.latestTelemetry());
@@ -409,32 +443,74 @@ export class DataService implements OnDestroy {
       let node = currentNodes.get(telemetry.node_id);
       
       if (node) {
-        console.log('[DataService] Updating existing node:', telemetry.node_id);
-        // Update existing node
-        node.rgbw = { r: telemetry.avg_r || 0, g: telemetry.avg_g || 0, b: telemetry.avg_b || 0, w: telemetry.avg_w || 0 };
-        node.temperature = telemetry.temp_c;
-        node.battery_voltage = telemetry.vbat_mv ? telemetry.vbat_mv / 1000 : undefined;
-        node.battery_percent = telemetry.vbat_mv ? Math.min(100, Math.max(0, ((telemetry.vbat_mv - 3000) / (4200 - 3000)) * 100)) : undefined;
-        node.brightness = telemetry.brightness;
-        node.status = 'online';
-        node.last_seen = new Date();
-        currentNodes.set(telemetry.node_id, node);
-      } else {
+        // Update existing node - check if values actually changed to avoid unnecessary re-renders
+        const newTemp = (telemetry as any).tempC || telemetry.temp_c;
+        
+        // Extract RGBW from nested light object if present (WebSocket format)
+        let avgR = telemetry.avg_r || 0;
+        let avgG = telemetry.avg_g || 0;
+        let avgB = telemetry.avg_b || 0;
+        let avgW = telemetry.avg_w || 0;
+        if ((telemetry as any).light) {
+          avgR = (telemetry as any).light.avgR || 0;
+          avgG = (telemetry as any).light.avgG || 0;
+          avgB = (telemetry as any).light.avgB || 0;
+          avgW = (telemetry as any).light.avgW || 0;
+        }
+        
+        const hasChanges = 
+          !node.rgbw ||
+          node.rgbw.r !== avgR ||
+          node.rgbw.g !== avgG ||
+          node.rgbw.b !== avgB ||
+          node.rgbw.w !== avgW ||
+          node.temperature !== newTemp ||
+          node.status !== 'online';
+        
+        if (hasChanges) {
+          console.log('[DataService] Updating existing node:', telemetry.node_id, 'tempC:', newTemp);
+          node.rgbw = { r: avgR, g: avgG, b: avgB, w: avgW };
+          node.temperature = newTemp;
+          node.battery_voltage = (telemetry as any).vbatMv ? (telemetry as any).vbatMv / 1000 : undefined;
+          node.battery_percent = (telemetry as any).vbatMv ? Math.min(100, Math.max(0, (((telemetry as any).vbatMv - 3000) / (4200 - 3000)) * 100)) : undefined;
+          node.brightness = (telemetry as any).light?.brightness || telemetry.brightness;
+          node.status = 'online';
+          node.last_seen = new Date();
+          currentNodes.set(telemetry.node_id, node);
+        }else {
+          // Just update timestamps without triggering signal update
+          node.last_seen = new Date();
+          return; // Skip signal update if nothing visual changed
+        }
+      }else {
         console.log('[DataService] Creating new node:', telemetry.node_id);
+        
+        // Extract RGBW from nested light object if present (WebSocket format)
+        let avgR = telemetry.avg_r || 0;
+        let avgG = telemetry.avg_g || 0;
+        let avgB = telemetry.avg_b || 0;
+        let avgW = telemetry.avg_w || 0;
+        if ((telemetry as any).light) {
+          avgR = (telemetry as any).light.avgR || 0;
+          avgG = (telemetry as any).light.avgG || 0;
+          avgB = (telemetry as any).light.avgB || 0;
+          avgW = (telemetry as any).light.avgW || 0;
+        }
+        
         // Create new node if it doesn't exist
         node = {
           _id: telemetry.node_id,
           node_id: telemetry.node_id,
-          name: telemetry.light_id || telemetry.node_id,
+          name: (telemetry as any).lightId || telemetry.light_id || telemetry.node_id,
           site_id: this.activeSiteId() || 'site001',
           mac_address: telemetry.node_id,
           paired: true,
           status: 'online',
-          rgbw: { r: telemetry.avg_r || 0, g: telemetry.avg_g || 0, b: telemetry.avg_b || 0, w: telemetry.avg_w || 0 },
-          brightness: telemetry.brightness,
-          temperature: telemetry.temp_c,
-          battery_voltage: telemetry.vbat_mv ? telemetry.vbat_mv / 1000 : undefined,
-          battery_percent: telemetry.vbat_mv ? Math.min(100, Math.max(0, ((telemetry.vbat_mv - 3000) / (4200 - 3000)) * 100)) : undefined,
+          rgbw: { r: avgR, g: avgG, b: avgB, w: avgW },
+          brightness: (telemetry as any).light?.brightness || telemetry.brightness,
+          temperature: (telemetry as any).tempC || telemetry.temp_c,
+          battery_voltage: (telemetry as any).vbatMv ? (telemetry as any).vbatMv / 1000 : undefined,
+          battery_percent: (telemetry as any).vbatMv ? Math.min(100, Math.max(0, (((telemetry as any).vbatMv - 3000) / (4200 - 3000)) * 100)) : undefined,
           last_seen: new Date(),
           created_at: new Date(),
           updated_at: new Date()
@@ -445,6 +521,11 @@ export class DataService implements OnDestroy {
       console.log('[DataService] Nodes map now has', currentNodes.size, 'nodes');
       this.nodes.set(currentNodes);
     } else if ('coord_id' in telemetry) {
+      // Coordinator telemetry - only log every 10th update to reduce console spam
+      if (Math.random() < 0.1) {
+        console.log('[DataService] Processing coordinator telemetry for:', telemetry.coord_id);
+      }
+      
       // Coordinator telemetry
       const currentCoords = new Map(this.coordinators());
       const coord = currentCoords.get(telemetry.coord_id);
@@ -453,17 +534,22 @@ export class DataService implements OnDestroy {
         // Update existing coordinator
         coord.last_seen = new Date();
         coord.status = 'online';
-        // Update other fields if available in telemetry
+        
+        // Update other fields if available in telemetry (support both camelCase and snake_case)
         if (telemetry.wifi_rssi !== undefined) coord.wifi_rssi = telemetry.wifi_rssi;
+        if ((telemetry as any).lightLux !== undefined) coord.light_lux = (telemetry as any).lightLux;
         if (telemetry.light_lux !== undefined) coord.light_lux = telemetry.light_lux;
+        if ((telemetry as any).tempC !== undefined) coord.temp_c = (telemetry as any).tempC;
         if (telemetry.temp_c !== undefined) coord.temp_c = telemetry.temp_c;
         if (telemetry.heap_free !== undefined) coord.heap_free = telemetry.heap_free;
         
-        currentCoords.set(telemetry.coord_id, coord);
-        this.coordinators.set(currentCoords);
+        // Don't trigger signal update for every telemetry (reduces flickering)
+        // The coordinator data is already updated in the map
         
-        // Also update the health signal
-        this.coordOnline.set(true);
+        // Update health signal if needed
+        if (!this.coordOnline()) {
+          this.coordOnline.set(true);
+        }
       } else {
         // Create a temporary coordinator entry if it doesn't exist
         const newCoord: Coordinator = {
@@ -476,8 +562,8 @@ export class DataService implements OnDestroy {
           created_at: new Date(),
           updated_at: new Date(),
           wifi_rssi: telemetry.wifi_rssi,
-          light_lux: telemetry.light_lux,
-          temp_c: telemetry.temp_c,
+          light_lux: (telemetry as any).lightLux || telemetry.light_lux, // Support camelCase from backend
+          temp_c: (telemetry as any).tempC || telemetry.temp_c, // Support camelCase from backend
           heap_free: telemetry.heap_free
         };
         
@@ -579,13 +665,13 @@ export class DataService implements OnDestroy {
     overall: boolean;
   } {
     const api = this.apiHealthy();
-    const mqtt = this.mqttConnected();
+    const websocket = this.wsConnected();
     const database = this.dbHealthy();
     const mqttBroker = this.mqttBrokerHealthy();
     const coordinator = this.coordOnline();
     
-    // WebSocket is now handled by MQTT service (WebSocket bridge)
-    const websocket = mqtt;
+    // MQTT indicator shows WebSocket status (not actual MQTT)
+    const mqtt = websocket;
     
     return {
       api,
@@ -594,7 +680,7 @@ export class DataService implements OnDestroy {
       database,
       mqttBroker,
       coordinator,
-      overall: api && mqtt && database && mqttBroker
+      overall: api && websocket && database
     };
   }
 
