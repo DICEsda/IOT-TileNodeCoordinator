@@ -1,0 +1,672 @@
+# IOT Smart Tile System - Node Coordinator
+
+## Project Report
+
+**Project Type:** Embedded IoT System  
+**Date:** December 2025  
+**Platform:** ESP32 (S3 Coordinator, C3 Nodes)  
+**Technologies:** ESP-NOW, MQTT, Go, Angular, Docker
+
+An intelligent IoT lighting system utilizing ESP-NOW for mesh networking between ESP32 nodes and a coordinator, with real-time monitoring, MQTT integration, and web-based control interface.
+
+## Overview
+
+The IOT Smart Tile System is a distributed embedded IoT platform designed for intelligent lighting control and environmental monitoring. The system consists of ESP32-C3 nodes that communicate via ESP-NOW with an ESP32-S3 coordinator, which acts as a gateway to MQTT, enabling cloud connectivity and web-based management.
+
+### Key Highlights
+
+- **ESP-NOW mesh networking** for low-latency node-to-coordinator communication
+- **MQTT integration** with hierarchical topic structure for cloud connectivity
+- **Real-time web dashboard** built with Angular and WebSockets
+- **Dual-axis environmental monitoring** with ambient light and temperature sensors
+- **mmWave radar integration** for presence detection (HLK-LD2450)
+- **Interactive pairing system** with visual LED feedback
+- **Docker-based deployment** for backend services (Go API, MongoDB, Mosquitto)
+- **Serial diagnostics** with structured telemetry logging
+
+## Features
+
+### Hardware Features
+- **Coordinator (ESP32-S3)**:
+  - ESP-NOW orchestration for multiple nodes
+  - MQTT broker connectivity with TLS support
+  - Ambient light sensor (analog ADC)
+  - mmWave radar sensor (LD2450) for presence detection
+  - Addressable RGB LED strips (NeoPixel)
+  - Touch button controls for pairing
+  - Serial diagnostic output
+  
+- **Nodes (ESP32-C3)**:
+  - RGBW LED control (PWM-based)
+  - TMP117 high-precision temperature sensor
+  - Button input with debouncing
+  - Battery voltage monitoring
+  - Deep sleep mode for power optimization
+  - OTA update capability
+
+### Software Features
+- Real-time bidirectional communication (Node ↔ Coordinator ↔ MQTT ↔ Backend ↔ Frontend)
+- RESTful API with WebSocket support for live updates
+- Persistent storage using NVS (Non-Volatile Storage) on ESP32
+- Interactive WiFi provisioning via serial console
+- Zone-based lighting control
+- Thermal management and monitoring
+- MongoDB for data persistence
+- Docker Compose orchestration for easy deployment
+
+## System Architecture
+
+```
+┌─────────────────┐     ESP-NOW      ┌──────────────────┐      MQTT       ┌─────────────┐
+│   ESP32-C3      │ ←─────────────→  │   ESP32-S3       │ ←──────────────→ │ Mosquitto   │
+│   Node 1        │                  │   Coordinator    │                 │   Broker    │
+└─────────────────┘                  └──────────────────┘                 └─────────────┘
+┌─────────────────┐     ESP-NOW           │                                     │
+│   ESP32-C3      │ ←─────────────────────┘                                     │
+│   Node 2        │                                                              │
+└─────────────────┘                                                              ▼
+┌─────────────────┐                                                      ┌─────────────┐
+│   ESP32-C3      │                                                      │ Go Backend  │
+│   Node N        │                                                      │   (API)     │
+└─────────────────┘                                                      └─────────────┘
+                                                                                 │
+    ┌────────────────────────────────────────────────────────────────────────────┤
+    │                                                                            │
+    ▼                                                                            ▼
+┌─────────────┐                                                          ┌─────────────┐
+│  MongoDB    │                                                          │  Angular    │
+│  Database   │                                                          │  Frontend   │
+└─────────────┘                                                          └─────────────┘
+```
+
+### Data Flow
+
+**Telemetry Path (Uplink)**:
+```
+Node Sensors → ESP-NOW → Coordinator → MQTT (site/{siteId}/node/{nodeId}/telemetry) → Backend → WebSocket → Frontend
+```
+
+**Command Path (Downlink)**:
+```
+Frontend → REST API → Backend → MQTT (site/{siteId}/coord/{coordId}/cmd) → Coordinator → ESP-NOW → Node
+```
+
+## Hardware
+
+### Coordinator Module
+- **Board**: ESP32-S3-DevKitC-1
+- **Flash**: 8MB
+- **RAM**: 512KB SRAM
+- **WiFi**: 2.4 GHz 802.11 b/g/n
+- **Connectivity**: ESP-NOW + MQTT over WiFi
+
+### Node Module
+- **Board**: ESP32-C3-MINI-1
+- **Flash**: 4MB
+- **RAM**: 400KB SRAM
+- **WiFi**: 2.4 GHz 802.11 b/g/n (ESP-NOW only)
+- **Power**: Battery-powered with deep sleep support
+
+### Sensors & Actuators
+
+**Coordinator**:
+- Ambient Light Sensor (Analog ADC on GPIO pin)
+- TSL2561 Digital Light Sensor (I2C)
+- HLK-LD2450 mmWave Radar (UART)
+- Adafruit NeoPixel LED strips
+
+**Nodes**:
+- TMP117 High-Precision Temperature Sensor (I2C, ±0.1°C accuracy)
+- RGBW LED Channels (PWM control)
+- Tactile buttons with hardware debouncing
+- Battery voltage divider circuit
+
+## Project Structure
+
+```
+IOT-TileNodeCoordinator/
+├── coordinator/                     # ESP32-S3 Coordinator firmware
+│   ├── src/
+│   │   ├── core/                    # Core coordinator logic
+│   │   │   ├── Coordinator.cpp/h    # Main coordinator orchestrator
+│   │   │   └── ...
+│   │   ├── managers/                # Subsystem managers
+│   │   │   ├── EspNowManager.cpp/h  # ESP-NOW communication
+│   │   │   ├── MqttManager.cpp/h    # MQTT broker integration
+│   │   │   ├── WifiManager.cpp/h    # WiFi provisioning & reconnect
+│   │   │   ├── NodeRegistry.cpp/h   # Node pairing & tracking
+│   │   │   ├── ZoneControl.cpp/h    # Zone-based lighting
+│   │   │   ├── ThermalControl.cpp/h # Temperature management
+│   │   │   └── ...
+│   │   ├── sensors/                 # Sensor implementations
+│   │   └── main.cpp                 # Entry point
+│   ├── platformio.ini               # PlatformIO configuration
+│   └── partitions.csv               # Flash partition table
+│
+├── node/                            # ESP32-C3 Node firmware
+│   ├── src/
+│   │   └── main.cpp                 # Node application
+│   └── platformio.ini               # PlatformIO configuration
+│
+├── shared/                          # Shared library (coordinator + nodes)
+│   ├── src/
+│   │   ├── Pins.h                   # Hardware pin definitions
+│   │   ├── Messages.h               # ESP-NOW message structures
+│   │   ├── Logger.h                 # Unified logging system
+│   │   └── ConfigManager.h          # NVS configuration wrapper
+│   └── library.json                 # PlatformIO library manifest
+│
+├── IOT-Backend-main/                # Go backend API
+│   └── IOT-Backend-main/
+│       ├── cmd/iot/main.go          # Backend entry point
+│       ├── internal/
+│       │   ├── api/                 # REST endpoints
+│       │   ├── mqtt/                # MQTT client
+│       │   ├── websocket/           # WebSocket server
+│       │   ├── database/            # MongoDB integration
+│       │   └── config/              # Configuration files
+│       ├── Dockerfile
+│       └── go.mod
+│
+├── IOT-Frontend-main/               # Angular web dashboard
+│   └── IOT-Frontend-main/
+│       ├── src/
+│       │   ├── app/                 # Angular components
+│       │   ├── environments/        # Environment configs
+│       │   └── ...
+│       ├── Dockerfile
+│       └── package.json
+│
+├── docs/                            # Documentation
+│   ├── diagrams/                    # System diagrams
+│   ├── Pics/                        # Photos and screenshots
+│   └── development/                 # Developer notes
+│
+├── scripts/                         # Utility scripts
+├── Datasheet/                       # Hardware datasheets
+├── Test code/                       # Testing utilities
+├── docker-compose.yml               # Docker orchestration
+├── api-collection.json              # Postman API collection
+└── README.md                        # This file
+```
+
+## Setup
+
+### Prerequisites
+
+- **PlatformIO** (VSCode extension or CLI)
+- **Docker & Docker Compose** (for backend services)
+- **Node.js 18+** (for frontend development)
+- **Go 1.21+** (for backend development)
+- **Git**
+
+### 1. Backend & Infrastructure Setup
+
+#### Start Docker Services
+
+```bash
+# Create .env file with your configuration
+cp .env.example .env
+
+# Start MongoDB, Mosquitto MQTT, Backend API, and Frontend
+docker-compose up -d
+
+# View logs
+docker-compose logs -f
+```
+
+The services will be available at:
+- **Frontend**: http://localhost:4200
+- **Backend API**: http://localhost:8000
+- **MQTT Broker**: localhost:1883 (username: user1, password: user1)
+- **MongoDB**: localhost:27017
+
+#### Manual Backend Setup (Alternative)
+
+```bash
+cd IOT-Backend-main/IOT-Backend-main
+
+# Install dependencies
+go mod download
+
+# Run backend
+go run cmd/iot/main.go
+```
+
+### 2. Coordinator Setup (ESP32-S3)
+
+#### Configure WiFi & MQTT
+
+The coordinator uses interactive serial provisioning. On first boot:
+
+1. Connect via serial monitor (115200 baud)
+2. Follow WiFi configuration prompts
+3. MQTT credentials are stored in `ConfigManager` under the `"mqtt"` namespace
+
+Alternatively, pre-configure via code before flashing.
+
+#### Build and Upload
+
+```bash
+cd coordinator
+
+# Build and upload firmware
+pio run -e esp32-s3-devkitc-1 -t upload
+
+# Open serial monitor
+pio device monitor
+```
+
+#### Expected Serial Output
+
+```
+COORDINATOR INIT: Starting...
+LOGGER: Begin
+NVS: Initialized
+WIFI: Connecting to <SSID>...
+WIFI: Connected (IP: 192.168.1.100)
+MQTT: Connecting to broker...
+MQTT: Connected
+COORDINATOR DATA: light=450, temp=22.5, mmwave=0
+STATUS: wifi=connected, mqtt=connected, pairing=closed
+```
+
+### 3. Node Setup (ESP32-C3)
+
+#### Build and Upload
+
+```bash
+cd node
+
+# For normal operation
+pio run -e esp32-c3-mini-1 -t upload
+
+# For debug mode with verbose logging
+pio run -e esp32-c3-mini-1-debug -t upload -t monitor
+```
+
+#### Pairing Process
+
+1. **Trigger pairing on coordinator**:
+   - Short-press touch button on coordinator, OR
+   - Send MQTT command: `{"cmd":"pair","duration_ms":60000}`
+
+2. **Pair the node**:
+   - Power on the node
+   - Node will automatically pair with coordinator
+   - LED feedback: Group of 4 pixels will flash on coordinator
+   - Serial output: `PAIRING MODE STARTED`, `NODE PAIRED: [MAC]`
+
+3. **Verify pairing**:
+   - Check serial output for `FETCHED NODE [MAC] DATA: ...`
+   - Check MQTT topic: `site/{siteId}/node/{nodeId}/telemetry`
+
+### 4. Frontend Setup (Development)
+
+```bash
+cd IOT-Frontend-main/IOT-Frontend-main
+
+# Install dependencies
+npm install
+
+# Start development server
+npm start
+
+# Navigate to http://localhost:4200
+```
+
+## Usage
+
+### Web Dashboard
+
+Access the Angular dashboard at `http://localhost:4200`:
+
+- **Live Telemetry**: View real-time data from all nodes and coordinator
+- **Zone Control**: Manage lighting zones and scenes
+- **Node Management**: Monitor node status, battery levels, and pairing
+- **mmWave Visualization**: See presence detection events
+- **Historical Data**: View temperature and light trends
+
+### MQTT API
+
+The system uses a hierarchical MQTT topic structure:
+
+#### Telemetry Topics (Published by Coordinator)
+
+```
+site/{siteId}/coord/{coordId}/telemetry    # Coordinator sensors (light, temp, mmWave)
+site/{siteId}/coord/{coordId}/mmwave       # mmWave radar events
+site/{siteId}/node/{nodeId}/telemetry      # Node telemetry (RGBW, temp, button, voltage)
+site/{siteId}/coord/{coordId}/status       # Coordinator status updates
+```
+
+#### Command Topics (Subscribed by Coordinator)
+
+```
+site/{siteId}/coord/{coordId}/cmd          # Coordinator commands (pairing, settings)
+site/{siteId}/node/{nodeId}/cmd            # Node commands (LED control, sleep)
+```
+
+#### Example Payloads
+
+**Coordinator Telemetry**:
+```json
+{
+  "coordId": "coord001",
+  "siteId": "site001",
+  "timestamp": 1701234567890,
+  "light": 450,
+  "temperature": 22.5,
+  "mmWave": {
+    "present": true,
+    "targetCount": 2
+  },
+  "wifi": {
+    "rssi": -65,
+    "connected": true
+  }
+}
+```
+
+**Node Telemetry**:
+```json
+{
+  "nodeId": "node001",
+  "macAddress": "AA:BB:CC:DD:EE:FF",
+  "timestamp": 1701234567890,
+  "rgbw": {
+    "r": 255,
+    "g": 128,
+    "b": 64,
+    "w": 200
+  },
+  "temperature": 23.2,
+  "buttonPressed": false,
+  "batteryVoltage": 3.7,
+  "rssi": -72
+}
+```
+
+**Pairing Command**:
+```json
+{
+  "cmd": "pair",
+  "duration_ms": 60000
+}
+```
+
+**LED Control Command**:
+```json
+{
+  "cmd": "setLed",
+  "nodeId": "node001",
+  "rgbw": {
+    "r": 255,
+    "g": 0,
+    "b": 0,
+    "w": 100
+  }
+}
+```
+
+### REST API
+
+See `api-collection.json` for the complete Postman collection.
+
+**Base URL**: `http://localhost:8000`
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/health` | GET | Health check |
+| `/api/sites` | GET | List all sites |
+| `/api/sites/{siteId}/coordinators` | GET | List coordinators |
+| `/api/sites/{siteId}/nodes` | GET | List nodes |
+| `/api/sites/{siteId}/nodes/{nodeId}` | GET | Get node details |
+| `/api/sites/{siteId}/telemetry` | GET | Get historical telemetry |
+| `/api/sites/{siteId}/zones` | GET/POST | Manage lighting zones |
+| `/ws` | WebSocket | Real-time data stream |
+
+### Serial Diagnostics
+
+The coordinator outputs structured telemetry over serial (115200 baud):
+
+```
+COORDINATOR DATA: light=450, temp=22.5, mmwave=present
+STATUS: wifi=connected, mqtt=connected, pairing=closed, nodes=3
+FETCHED NODE [AA:BB:CC:DD:EE:FF] DATA: temp=23.2, rgbw=[255,128,64,200], rssi=-72
+```
+
+## Development
+
+### Building the Coordinator
+
+```bash
+cd coordinator
+
+# Build only
+pio run -e esp32-s3-devkitc-1
+
+# Upload and monitor
+pio run -e esp32-s3-devkitc-1 -t upload -t monitor
+
+# Clean build
+pio run -t clean
+```
+
+### Building Nodes
+
+```bash
+cd node
+
+# Normal build
+pio run -e esp32-c3-mini-1 -t upload
+
+# Debug build with verbose logging
+pio run -e esp32-c3-mini-1-debug -t upload -t monitor
+
+# OTA-enabled build
+pio run -e esp32-c3-mini-1-ota -t upload
+
+# Standalone test (without shared library)
+pio run -e esp32-c3-mini-1-standalone -t upload
+```
+
+### Shared Library Updates
+
+When modifying `shared/` code:
+
+1. Update both `coordinator/` and `node/` as needed
+2. Keep message structures synchronized (`Messages.h`)
+3. Test on both platforms
+4. Update documentation
+
+### Backend Development
+
+```bash
+cd IOT-Backend-main/IOT-Backend-main
+
+# Run with hot reload (install air: go install github.com/cosmtrek/air@latest)
+air
+
+# Run tests
+go test ./...
+
+# Build binary
+go build -o bin/iot-backend cmd/iot/main.go
+```
+
+### Frontend Development
+
+```bash
+cd IOT-Frontend-main/IOT-Frontend-main
+
+# Serve with hot reload
+npm start
+
+# Build for production
+npm run build
+
+# Run tests
+npm test
+
+# Lint
+npm run lint
+```
+
+## Pin Configuration
+
+### Coordinator (ESP32-S3)
+
+```cpp
+// I2C Bus
+#define SDA_PIN 21
+#define SCL_PIN 22
+
+// Sensors
+#define AMBIENT_LIGHT_ADC 36        // Analog light sensor
+#define MMWAVE_RX 16                // LD2450 RX
+#define MMWAVE_TX 17                // LD2450 TX
+
+// LEDs
+#define NEOPIXEL_PIN 48             // Addressable LED strip
+#define STATUS_LED_PIN 2            // Status indicator
+
+// Controls
+#define TOUCH_BUTTON_PIN 0          // Pairing button
+```
+
+### Node (ESP32-C3)
+
+```cpp
+// I2C Bus (TMP117)
+#define SDA_PIN 8
+#define SCL_PIN 9
+
+// LED PWM Channels
+#define LED_R_PIN 2
+#define LED_G_PIN 3
+#define LED_B_PIN 4
+#define LED_W_PIN 5
+
+// Controls
+#define BUTTON_PIN 6
+
+// Battery Monitor
+#define BATTERY_ADC 0               // ADC1_CH0
+```
+
+## Troubleshooting
+
+### Coordinator Issues
+
+**WiFi Not Connecting**:
+- Check serial console for interactive provisioning prompts
+- Verify SSID and password
+- Ensure 2.4 GHz WiFi (5 GHz not supported)
+- Check router firewall settings
+
+**MQTT Connection Fails**:
+- Verify broker address in `ConfigManager` ("mqtt" namespace)
+- Check credentials (username: user1, password: user1)
+- Test broker with `mosquitto_sub`: `mosquitto_sub -h localhost -p 1883 -u user1 -P user1 -t '#'`
+
+**NVS Errors**:
+- Erase and re-initialize: See `docs/development/COMPLETE_NVS_FIX.md`
+- Flash size mismatch: Verify partition table
+
+### Node Issues
+
+**Node Not Pairing**:
+- Ensure coordinator is in pairing mode (blue LED pulse)
+- Power cycle the node
+- Check ESP-NOW channel (must match coordinator, typically channel 1)
+- Verify MAC address format
+
+**Node Not Sending Data**:
+- Check serial output for ESP-NOW send errors
+- Verify coordinator is receiving (check coordinator serial)
+- Check distance (ESP-NOW range ~100m line-of-sight)
+
+**Deep Sleep Issues**:
+- Disable deep sleep for debugging: Remove `-DENABLE_DEEP_SLEEP` from `platformio.ini`
+- Check wake-up GPIO configuration
+
+### Backend Issues
+
+**MongoDB Connection Error**:
+```bash
+# Check MongoDB is running
+docker ps | grep mongodb
+
+# Restart MongoDB
+docker-compose restart mongodb
+```
+
+**MQTT Messages Not Received**:
+```bash
+# Test MQTT subscription
+mosquitto_sub -h localhost -p 1883 -u user1 -P user1 -t 'site/#' -v
+
+# Check backend logs
+docker-compose logs -f backend
+```
+
+### Frontend Issues
+
+**WebSocket Connection Failed**:
+- Verify backend is running: `curl http://localhost:8000/health`
+- Check WebSocket URL in environment config
+- Inspect browser console for errors
+
+## Best Practices
+
+### Coordinator Development
+- Never double-call `Logger::begin` (use `Logger::setMinLevel` for verbosity)
+- Follow `*Manager` convention for subsystems
+- Always call `wifi->loop()` before MQTT operations
+- Keep ESP-NOW configuration inside `EspNowManager`
+- Use `ConfigManager` namespaces for persistent storage
+
+### Node Development
+- Minimize wake time for battery life
+- Use ESP-NOW only (no WiFi STA mode)
+- Implement exponential backoff for retries
+- Log critical events before deep sleep
+
+### Backend Development
+- Keep MQTT topics additive (add optional fields, don't break existing)
+- Handle disconnections gracefully
+- Use structured logging
+- Validate all inputs
+
+### Frontend Development
+- Handle real-time data efficiently (debounce updates)
+- Show connection status prominently
+- Provide offline fallbacks
+- Cache historical data
+
+## Documentation
+
+- **Architecture**: See `docs/development/` for detailed subsystem documentation
+- **MQTT API**: `docs/mqtt_api.md` and `docs/development/MQTT_TOPIC_ALIGNMENT_COMPLETE.md`
+- **NVS Guide**: `docs/development/COMPLETE_NVS_FIX.md`
+- **Hardware**: See `Datasheet/` for component datasheets
+
+## Dependencies
+
+### Firmware Libraries
+- ESP32 Arduino Core (Espressif Systems)
+- PlatformIO build system
+- PubSubClient (MQTT client by Nick O'Leary)
+- ArduinoJson (Benoit Blanchon)
+- Adafruit sensor libraries (NeoPixel, TSL2561, TMP117, Unified Sensor)
+- ld2450 library (mmWave radar by goodgod)
+
+### Backend Stack
+- Go 1.21+
+- MongoDB 7.0
+- Eclipse Mosquitto 2.0
+
+### Frontend Stack
+- Angular 15+
+- Node.js 18+
