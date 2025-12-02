@@ -9,85 +9,115 @@ participant "Angular\nFrontend" as Frontend
 participant "Go Backend\nREST API" as Backend
 participant "MongoDB" as DB
 participant "Mosquitto\nMQTT Broker" as MQTT
-participant "ESP32-S3\nCoordinator" as Coord
-participant "ESP32-C3\nNode" as Node
+participant "ESP32-S3\nCoordinator 1" as Coord1
+participant "ESP32-C3\nNode 1.1" as Node11
+participant "ESP32-S3\nCoordinator M" as CoordM
+participant "ESP32-C3\nNode M.N" as NodeMN
 
-== Telemetry Uplink Flow ==
+== Telemetry Uplink Flow (Multiple Coordinators) ==
 
-Node -> Node: Read sensors\n(RGBW, Temp, Button,\nBattery, RSSI)
-Node -> Coord: ESP-NOW Message\nNodeStatus frame
-activate Coord
-Coord -> Coord: NodeRegistry\nupdate cache
-Coord -> Coord: Update LED strip\n(visual feedback)
-Coord -> MQTT: Publish\nsite/{siteId}/node/{nodeId}/telemetry
-deactivate Coord
+note over Node11, NodeMN
+  Each coordinator manages N nodes independently
+  All coordinators publish to same MQTT broker
+end note
 
-MQTT -> Backend: MQTT message
+Node11 -> Node11: Read sensors\n(RGBW, Temp, Button,\nBattery, RSSI)
+Node11 -> Coord1: ESP-NOW Message\nNodeStatus frame
+activate Coord1
+Coord1 -> Coord1: NodeRegistry\nupdate cache
+Coord1 -> Coord1: Update LED strip\n(visual feedback)
+Coord1 -> MQTT: Publish\nsite/{siteId}/node/1.1/telemetry
+deactivate Coord1
+
+NodeMN -> NodeMN: Read sensors
+NodeMN -> CoordM: ESP-NOW Message\nNodeStatus frame
+activate CoordM
+CoordM -> CoordM: NodeRegistry\nupdate cache
+CoordM -> MQTT: Publish\nsite/{siteId}/node/M.N/telemetry
+deactivate CoordM
+
+MQTT -> Backend: MQTT messages\n(all coordinators)
 activate Backend
-Backend -> DB: Store telemetry\n(timestamp, values)
-Backend -> Frontend: WebSocket push\n(real-time update)
+Backend -> DB: Store telemetry\n(all nodes, all coordinators)
+Backend -> Frontend: WebSocket push\n(aggregated updates)
 deactivate Backend
 
-Frontend -> Frontend: Update dashboard\n(charts, node status)
+Frontend -> Frontend: Update dashboard\n(all coordinators & nodes)
 
-== Coordinator Telemetry Flow ==
+== Coordinator Telemetry Flow (All Coordinators) ==
 
-Coord -> Coord: Read sensors\n(Light, Temp, mmWave)
-Coord -> MQTT: Publish\nsite/{siteId}/coord/{coordId}/telemetry
-MQTT -> Backend: MQTT message
+Coord1 -> Coord1: Read sensors\n(Light, Temp, mmWave)
+Coord1 -> MQTT: Publish\nsite/{siteId}/coord/1/telemetry
+
+CoordM -> CoordM: Read sensors\n(Light, Temp, mmWave)
+CoordM -> MQTT: Publish\nsite/{siteId}/coord/M/telemetry
+
+MQTT -> Backend: MQTT messages\n(from all coordinators)
 activate Backend
-Backend -> DB: Store coordinator data
-Backend -> Frontend: WebSocket push
+Backend -> DB: Store coordinator data\n(all M coordinators)
+Backend -> Frontend: WebSocket push\n(aggregated data)
 deactivate Backend
-Frontend -> Frontend: Update coordinator view
+Frontend -> Frontend: Update coordinator views\n(show all M coordinators)
 
-== Command Downlink Flow ==
+== Command Downlink Flow (Target Specific Coordinator) ==
 
-User -> Frontend: Set LED command\n(Zone control)
+User -> Frontend: Set LED command\n(Select Zone in Coordinator 1)
 Frontend -> Backend: HTTP POST\n/api/sites/{siteId}/zones/{zoneId}/cmd
 activate Backend
 Backend -> DB: Log command
-Backend -> MQTT: Publish\nsite/{siteId}/coord/{coordId}/cmd
+Backend -> MQTT: Publish\nsite/{siteId}/coord/1/cmd
 deactivate Backend
 
-MQTT -> Coord: MQTT message\n{"cmd":"setLed",...}
-activate Coord
-Coord -> Coord: Parse command\n(MqttManager)
-Coord -> Node: ESP-NOW\nLightingCommand
-deactivate Coord
+MQTT -> Coord1: MQTT message\n{"cmd":"setLed",...}
+activate Coord1
+Coord1 -> Coord1: Parse command\n(MqttManager)
+Coord1 -> Node11: ESP-NOW\nLightingCommand
+deactivate Coord1
 
-Node -> Node: Set RGBW LEDs\n(PWM channels)
-Node -> Coord: ESP-NOW Ack\nNodeStatus update
-Coord -> MQTT: Publish updated status
+Node11 -> Node11: Set RGBW LEDs\n(PWM channels)
+Node11 -> Coord1: ESP-NOW Ack\nNodeStatus update
+Coord1 -> MQTT: Publish updated status
 MQTT -> Backend: Confirmation
 Backend -> Frontend: WebSocket notification
 Frontend -> User: Visual confirmation
 
-== Pairing Flow ==
+note right
+  Commands are coordinator-specific
+  Each coordinator manages its own
+  N nodes independently
+end note
 
-User -> Frontend: Trigger pairing\n(60 seconds)
-Frontend -> Backend: POST /api/pairing
-Backend -> MQTT: Publish\nsite/{siteId}/coord/{coordId}/cmd\n{"cmd":"pair","duration_ms":60000}
-MQTT -> Coord: Pairing command
+== Pairing Flow (Coordinator-Specific) ==
 
-activate Coord
-Coord -> Coord: NodeRegistry\nstartPairing()
-Coord -> Coord: EspNow\nenablePairingMode()
-Coord -> Coord: Status LED\npulse blue
-deactivate Coord
+User -> Frontend: Trigger pairing\n(Select Coordinator 1, 60s)
+Frontend -> Backend: POST /api/coordinators/1/pairing
+Backend -> MQTT: Publish\nsite/{siteId}/coord/1/cmd\n{"cmd":"pair","duration_ms":60000}
+MQTT -> Coord1: Pairing command
 
-Node -> Node: Power on/reset
-Node -> Coord: ESP-NOW\npairing request
-activate Coord
-Coord -> Coord: Add to NodeRegistry\n(NVS storage)
-Coord -> Coord: Flash LED strip\n(visual feedback)
-Coord -> MQTT: Publish\nNew node paired
-deactivate Coord
+activate Coord1
+Coord1 -> Coord1: NodeRegistry\nstartPairing()
+Coord1 -> Coord1: EspNow\nenablePairingMode()
+Coord1 -> Coord1: Status LED\npulse blue
+deactivate Coord1
+
+Node11 -> Node11: Power on/reset
+Node11 -> Coord1: ESP-NOW\npairing request
+activate Coord1
+Coord1 -> Coord1: Add to NodeRegistry\n(NVS storage)
+Coord1 -> Coord1: Flash LED strip\n(visual feedback)
+Coord1 -> MQTT: Publish\nNew node paired (1.1)
+deactivate Coord1
 
 MQTT -> Backend: New node event
-Backend -> DB: Store node info
+Backend -> DB: Store node info\n(linked to Coordinator 1)
 Backend -> Frontend: WebSocket update
-Frontend -> User: "Node paired successfully"
+Frontend -> User: "Node 1.1 paired to Coordinator 1"
+
+note right
+  Each coordinator pairs independently
+  Nodes belong to specific coordinator
+  NodeRegistry stored in coordinator NVS
+end note
 
 == Historical Data Query ==
 

@@ -1,9 +1,11 @@
 @startuml IOT Smart Tile System Architecture
 
-!define RECTANGLE class
-
 skinparam componentStyle rectangle
 skinparam backgroundColor #FEFEFE
+skinparam linetype ortho
+skinparam nodesep 80
+skinparam ranksep 80
+
 skinparam component {
     BackgroundColor<<coordinator>> #FFE4B5
     BackgroundColor<<node>> #B0E0E6
@@ -12,114 +14,165 @@ skinparam component {
     BackgroundColor<<infrastructure>> #E6E6FA
 }
 
-' Hardware Layer - Nodes
-package "ESP32-C3 Nodes" <<node>> {
-    component [Node 1\n---\nRGBW LEDs\nTMP117 Temp Sensor\nButton Input\nBattery Monitor] as Node1
-    component [Node 2\n---\nRGBW LEDs\nTMP117 Temp Sensor\nButton Input\nBattery Monitor] as Node2
-    component [Node N\n---\nRGBW LEDs\nTMP117 Temp Sensor\nButton Input\nBattery Monitor] as NodeN
-}
-
-' Hardware Layer - Coordinator
-package "ESP32-S3 Coordinator" <<coordinator>> {
-    component [Coordinator\n---\nEspNowManager\nMqttManager\nWifiManager\nNodeRegistry\nZoneControl\nThermalControl\nButtonControl] as Coordinator
-    component [Sensors\n---\nAmbient Light (ADC)\nTSL2561 Light\nLD2450 mmWave\nNeoPixel LEDs] as CoordSensors
-    
-    Coordinator -down- CoordSensors
-}
-
-' Infrastructure Layer
-package "MQTT Infrastructure" <<infrastructure>> {
-    component [Mosquitto Broker\n---\nPort 1883\nuser1/user1] as Mosquitto
-}
-
-package "Database" <<infrastructure>> {
-    database [MongoDB\n---\nPort 27017\niot_smarttile] as MongoDB
+' Frontend Layer (Top)
+package "Angular Frontend" <<frontend>> {
+    component [Web Dashboard\n---\nPort 4200\nLive Telemetry\nZone Control\nNode Management\nmmWave Visualization] as Frontend
 }
 
 ' Backend Layer
 package "Go Backend API" <<backend>> {
-    component [REST API\n---\nHTTP Server\nPort 8000\n/api/sites\n/api/nodes\n/health] as RestAPI
-    component [WebSocket Server\n---\nReal-time updates\n/ws] as WebSocket
-    component [MQTT Client\n---\nSubscribe/Publish\nTelemetry handling] as MqttClient
+    component [REST API\n---\n/api/sites\n/api/coordinators\n/api/nodes\n/health] as RestAPI
+    component [WebSocket Server\n---\n/ws] as WebSocket
+    component [MQTT Client\n---\nSubscribe: site/#\nPublish: Commands] as MqttClient
+}
+
+' Infrastructure Layer
+package "Infrastructure" <<infrastructure>> {
+    component [Mosquitto Broker\n---\nPort: 1883\nCredentials: user1/user1] as Mosquitto
+    database [MongoDB\n---\nPort: 27017\nDatabase: iot_smarttile] as MongoDB
+}
+
+' Hardware Layer - Multiple Coordinator Groups
+together {
+    ' Coordinator 1 with its nodes
+    package "Coordinator Group 1" {
+        package "ESP32-S3 Coordinator 1" <<coordinator>> {
+            component [Coord 1\n---\nManagers:\nESP-NOW, MQTT\nWiFi, NodeRegistry\nZone, Thermal] as Coord1
+            component [Sensors\n---\nLight (ADC)\nTSL2561\nLD2450 mmWave\nNeoPixel LEDs] as Sensor1
+            Coord1 -- Sensor1
+        }
+        
+        package "Nodes (Coord 1)" <<node>> {
+            component [Node 1.1\n---\nRGBW LEDs\nTMP117] as Node11
+            component [Node 1.2\n---\nRGBW LEDs\nTMP117] as Node12
+            component [Node 1.N\n---\nRGBW LEDs\nTMP117] as Node1N
+            Node11 -[hidden]right- Node12
+            Node12 -[hidden]right- Node1N
+        }
+    }
     
-    RestAPI -[hidden]right- WebSocket
-    WebSocket -[hidden]right- MqttClient
+    ' Coordinator 2 with its nodes
+    package "Coordinator Group 2" {
+        package "ESP32-S3 Coordinator 2" <<coordinator>> {
+            component [Coord 2\n---\nManagers:\nESP-NOW, MQTT\nWiFi, NodeRegistry\nZone, Thermal] as Coord2
+            component [Sensors\n---\nLight (ADC)\nTSL2561\nLD2450 mmWave\nNeoPixel LEDs] as Sensor2
+            Coord2 -- Sensor2
+        }
+        
+        package "Nodes (Coord 2)" <<node>> {
+            component [Node 2.1\n---\nRGBW LEDs\nTMP117] as Node21
+            component [Node 2.2\n---\nRGBW LEDs\nTMP117] as Node22
+            component [Node 2.N\n---\nRGBW LEDs\nTMP117] as Node2N
+            Node21 -[hidden]right- Node22
+            Node22 -[hidden]right- Node2N
+        }
+    }
+    
+    ' Coordinator M with its nodes
+    package "Coordinator Group M" {
+        package "ESP32-S3 Coordinator M" <<coordinator>> {
+            component [Coord M\n---\nManagers:\nESP-NOW, MQTT\nWiFi, NodeRegistry\nZone, Thermal] as CoordM
+            component [Sensors\n---\nLight (ADC)\nTSL2561\nLD2450 mmWave\nNeoPixel LEDs] as SensorM
+            CoordM -- SensorM
+        }
+        
+        package "Nodes (Coord M)" <<node>> {
+            component [Node M.1\n---\nRGBW LEDs\nTMP117] as NodeM1
+            component [Node M.2\n---\nRGBW LEDs\nTMP117] as NodeM2
+            component [Node M.N\n---\nRGBW LEDs\nTMP117] as NodeMN
+            NodeM1 -[hidden]right- NodeM2
+            NodeM2 -[hidden]right- NodeMN
+        }
+    }
 }
 
-' Frontend Layer
-package "Angular Frontend" <<frontend>> {
-    component [Web Dashboard\n---\nPort 4200\nLive Telemetry\nZone Control\nNode Management] as Frontend
-}
+' ESP-NOW Communication (Nodes to Coordinators)
+Node11 -up-> Coord1 : ESP-NOW
+Node12 -up-> Coord1 : ESP-NOW
+Node1N -up-> Coord1 : ESP-NOW
 
-' ESP-NOW Communication (Nodes to Coordinator)
-Node1 -down-> Coordinator : ESP-NOW\n(Low-latency mesh)
-Node2 -down-> Coordinator : ESP-NOW
-NodeN -down-> Coordinator : ESP-NOW
+Node21 -up-> Coord2 : ESP-NOW
+Node22 -up-> Coord2 : ESP-NOW
+Node2N -up-> Coord2 : ESP-NOW
 
-' WiFi/MQTT Communication (Coordinator to Broker)
-Coordinator -down-> Mosquitto : MQTT over WiFi\nsite/{siteId}/coord/{coordId}/...\nsite/{siteId}/node/{nodeId}/...
+NodeM1 -up-> CoordM : ESP-NOW
+NodeM2 -up-> CoordM : ESP-NOW
+NodeMN -up-> CoordM : ESP-NOW
+
+' WiFi/MQTT Communication (All Coordinators to Broker)
+Coord1 -up-> Mosquitto : MQTT/WiFi\nsite/{siteId}/coord/1/...
+Coord2 -up-> Mosquitto : MQTT/WiFi\nsite/{siteId}/coord/2/...
+CoordM -up-> Mosquitto : MQTT/WiFi\nsite/{siteId}/coord/M/...
 
 ' Backend to Infrastructure
-Mosquitto -down-> MqttClient : Subscribe\nsite/#
-MqttClient -up-> Mosquitto : Publish\nCommands
+Mosquitto -left-> MqttClient : Subscribe\nsite/#
+MqttClient -right-> Mosquitto : Publish\nCommands
 MqttClient -down-> MongoDB : Store\nTelemetry
-RestAPI -down-> MongoDB : Query\nHistorical Data
+RestAPI -down-> MongoDB : Query\nData
 
 ' Backend to Frontend
-WebSocket -up-> Frontend : Real-time\nWebSocket Stream
-RestAPI -up-> Frontend : HTTP\nREST API
+WebSocket -up-> Frontend : Real-time\nWebSocket
+RestAPI -up-> Frontend : HTTP\nREST
 
-' Data Flow Annotations
-note right of Node1
-  **Telemetry Data:**
-  - RGBW values
-  - Temperature
-  - Button state
+' Notes
+note right of Coord1
+  **Each Coordinator:**
+  - Manages N nodes via ESP-NOW
+  - Publishes to MQTT broker
+  - Independent WiFi connection
+  - Site/Zone configuration
+  - Local sensor data
+end note
+
+note left of Node11
+  **Node Telemetry:**
+  - RGBW LED states
+  - Temperature (TMP117)
+  - Button events
   - Battery voltage
-  - RSSI
+  - RSSI signal strength
 end note
 
-note right of Coordinator
-  **Coordinator Data:**
-  - Light intensity
-  - Temperature
-  - mmWave presence
-  - WiFi status
-  - Node registry
-end note
-
-note left of Mosquitto
-  **MQTT Topics:**
+note top of Mosquitto
+  **MQTT Topic Hierarchy:**
   
-  Telemetry (Publish):
+  Per Coordinator:
   • site/{siteId}/coord/{coordId}/telemetry
   • site/{siteId}/coord/{coordId}/mmwave
-  • site/{siteId}/node/{nodeId}/telemetry
   • site/{siteId}/coord/{coordId}/status
-  
-  Commands (Subscribe):
   • site/{siteId}/coord/{coordId}/cmd
+  
+  Per Node (via Coordinator):
+  • site/{siteId}/node/{nodeId}/telemetry
   • site/{siteId}/node/{nodeId}/cmd
 end note
 
 note bottom of MongoDB
-  **Collections:**
-  - sites
-  - coordinators
-  - nodes
+  **MongoDB Collections:**
+  - sites (1 per deployment)
+  - coordinators (M per site)
+  - nodes (N per coordinator)
   - telemetry_history
   - zones
+  - commands_log
   - events
 end note
 
 ' Legend
-legend bottom right
-  |= Symbol |= Description |
-  | <<coordinator>> | ESP32-S3 Coordinator |
-  | <<node>> | ESP32-C3 Nodes |
+legend bottom left
+  |= Color |= Component Type |
+  | <<coordinator>> | ESP32-S3 Coordinators (M instances) |
+  | <<node>> | ESP32-C3 Nodes (N per coordinator) |
   | <<backend>> | Go Backend Services |
-  | <<frontend>> | Angular Web UI |
-  | <<infrastructure>> | Database & Messaging |
+  | <<frontend>> | Angular Web Dashboard |
+  | <<infrastructure>> | MQTT Broker & Database |
+  
+  **Architecture:**
+  • M Coordinators per Site
+  • N Nodes per Coordinator
+  • Each Coordinator = Independent ESP-NOW mesh
+  • All Coordinators → Same MQTT Broker
+  • Centralized Backend & Frontend
 endlegend
 
 @enduml
