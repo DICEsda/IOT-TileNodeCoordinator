@@ -7,6 +7,8 @@
 **Platform:** ESP32 (S3 Coordinator, C3 Nodes)  
 **Technologies:** ESP-NOW, MQTT, Go, Angular, Docker
 
+**Tags:** `IoT` `ESP32` `ESP32-S3` `ESP32-C3` `ESP-NOW` `MQTT` `Embedded-Systems` `Real-Time` `Mesh-Networking` `Smart-Lighting` `RGBW-LED` `Temperature-Sensor` `mmWave-Radar` `Presence-Detection` `Arduino` `PlatformIO` `Go` `Golang` `Angular` `TypeScript` `WebSocket` `REST-API` `MongoDB` `Docker` `Docker-Compose` `Mosquitto` `Home-Automation` `Wireless-Sensor-Network` `ESP-NOW-Protocol` `NeoPixel` `TMP117` `TSL2561` `LD2450` `NVS` `OTA-Updates` `Zone-Control` `Battery-Monitoring` `Deep-Sleep` `Low-Power` `Time-Series` `PlantUML`
+
 An intelligent IoT lighting system utilizing ESP-NOW for mesh networking between ESP32 nodes and a coordinator, with real-time monitoring, MQTT integration, and web-based control interface.
 
 ## Overview
