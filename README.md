@@ -11,13 +11,7 @@
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?style=flat&logo=docker&logoColor=white)](https://www.docker.com/)
 [![License](https://img.shields.io/badge/License-MIT-yellow?style=flat)](LICENSE)
 
-## Project Report
-
-**Project Type:** Embedded IoT System  
-**Date:** December 2025  
-**Platform:** ESP32 (S3 Coordinator, C3 Nodes)  
-**Technologies:** ESP-NOW, MQTT, Go, Angular, Docker
-
+## Project
 **Technologies & Features:**
 - **Hardware:** `ESP32-S3` `ESP32-C3` `ESP-NOW Protocol` `RGBW LED` `TMP117` `TSL2561` `LD2450 mmWave`
 - **Networking:** `MQTT` `WebSocket` `REST API` `Mesh Networking` `Wireless Sensor Network`
