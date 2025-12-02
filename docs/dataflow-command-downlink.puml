@@ -4,33 +4,33 @@
 skinparam sequenceMessageAlign center
 skinparam backgroundColor #FEFEFE
 
-title Command Downlink Flow (Target Specific Coordinator)
+title Command Downlink Flow (Zone 1)
 
 actor User
 participant "Angular\nFrontend" as Frontend
 participant "Go Backend\nREST API" as Backend
 participant "MongoDB" as DB
 participant "Mosquitto\nMQTT Broker" as MQTT
-participant "ESP32-S3\nCoordinator 1" as Coord1
+participant "ESP32-S3\nCoordinator 1\n(Zone 1)" as Coord1
 participant "ESP32-C3\nNode 1.1" as Node11
 
 note over User, Node11
-  User selects a zone in Coordinator 1
-  Commands are coordinator-specific
-  Each coordinator manages its N nodes independently
+  User selects Zone 1 (Coordinator 1)
+  Commands are zone-specific
+  2 Zones: Zone 1 and Zone N
 end note
 
 == User Initiates LED Command ==
 
-User -> Frontend: Click "Set Zone 3 to Warm White"\n(Zone 3 is in Coordinator 1)
-Frontend -> Frontend: Build command payload\n{\n  "cmd": "setLed",\n  "zoneId": "3",\n  "rgbw": {r:255, g:200, b:150, w:255}\n}
+User -> Frontend: Click "Set Zone 1 to Warm White"
+Frontend -> Frontend: Build command payload\n{\n  "cmd": "setLed",\n  "zoneId": "1",\n  "rgbw": {r:255, g:200, b:150, w:255}\n}
 
-Frontend -> Backend: HTTP POST\n/api/sites/{siteId}/zones/3/cmd
+Frontend -> Backend: HTTP POST\n/api/sites/{siteId}/zones/1/cmd
 activate Backend
 Backend -> Backend: Validate command
-Backend -> Backend: Lookup zone → Coordinator 1
+Backend -> Backend: Lookup Zone 1 → Coordinator 1
 Backend -> DB: Log command\n(audit trail)
-Backend -> MQTT: Publish\nsite/{siteId}/coord/1/cmd\n{\n  "cmd": "setLed",\n  "zoneId": "3",\n  "rgbw": {...}\n}
+Backend -> MQTT: Publish\nsite/{siteId}/coord/1/cmd\n{\n  "cmd": "setLed",\n  "zoneId": "1",\n  "rgbw": {...}\n}
 deactivate Backend
 
 == Coordinator Receives and Processes Command ==
@@ -38,13 +38,13 @@ deactivate Backend
 MQTT -> Coord1: MQTT message\n{"cmd":"setLed",...}
 activate Coord1
 Coord1 -> Coord1: MqttManager\nparse command
-Coord1 -> Coord1: ZoneControl\nresolve zone 3 → Nodes [1.1, 1.2, 1.3]
+Coord1 -> Coord1: ZoneControl\nresolve Zone 1 → All nodes [1.1, 1.2, ..., 1.N]
 Coord1 -> Node11: ESP-NOW\nLightingCommand\n(RGBW values)
 deactivate Coord1
 
 note right of Coord1
-  Coordinator sends ESP-NOW
-  commands to all nodes in zone 3
+  Coordinator 1 sends ESP-NOW
+  commands to all N nodes in Zone 1
 end note
 
 == Node Executes Command ==
@@ -66,13 +66,13 @@ Backend -> DB: Update node state
 Backend -> Frontend: WebSocket notification\n{\n  "event": "ledChanged",\n  "nodeId": "1.1",\n  "rgbw": {...}\n}
 deactivate Backend
 
-Frontend -> Frontend: Update UI\n- Zone card shows new color\n- Node status updated
-Frontend -> User: Visual confirmation\n✓ Zone 3 updated
+Frontend -> Frontend: Update UI\n- Zone 1 card shows new color\n- Node status updated
+Frontend -> User: Visual confirmation\n✓ Zone 1 updated
 
 note right of Frontend
   UI reflects the change:
-  • Zone color preview
-  • Node status indicators
+  • Zone 1 color preview
+  • All nodes in Zone 1
   • Real-time feedback
 end note
 

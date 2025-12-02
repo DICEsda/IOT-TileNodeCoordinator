@@ -4,62 +4,65 @@
 skinparam sequenceMessageAlign center
 skinparam backgroundColor #FEFEFE
 
-title Node Telemetry Uplink Flow (Multiple Coordinators)
+title Node Telemetry Uplink Flow (2 Zones)
 
 participant "ESP32-C3\nNode 1.1" as Node11
-participant "ESP32-S3\nCoordinator 1" as Coord1
-participant "ESP32-C3\nNode M.N" as NodeMN
-participant "ESP32-S3\nCoordinator M" as CoordM
+participant "ESP32-S3\nCoordinator 1\n(Zone 1)" as Coord1
+participant "ESP32-C3\nNode N.N" as NodeNN
+participant "ESP32-S3\nCoordinator N\n(Zone N)" as CoordN
 participant "Mosquitto\nMQTT Broker" as MQTT
 participant "Go Backend\nREST API" as Backend
 participant "MongoDB" as DB
 participant "Angular\nFrontend" as Frontend
 
-note over Node11, CoordM
+note over Node11, CoordN
+  2 Zones: Zone 1 and Zone N
   Each coordinator manages N nodes independently
-  All coordinators publish to same MQTT broker
+  Both coordinators publish to same MQTT broker
 end note
 
-== Node 1.1 Sends Telemetry to Coordinator 1 ==
+== Zone 1: Node 1.1 Sends Telemetry to Coordinator 1 ==
 
 Node11 -> Node11: Read sensors\n(RGBW, Temp, Button,\nBattery, RSSI)
 Node11 -> Coord1: ESP-NOW Message\nNodeStatus frame
 activate Coord1
 Coord1 -> Coord1: NodeRegistry\nupdate cache
 Coord1 -> Coord1: Update LED strip\n(visual feedback)
-Coord1 -> MQTT: Publish\nsite/{siteId}/node/1.1/telemetry\n{\n  "nodeId": "1.1",\n  "temperature": 23.2,\n  "rgbw": {...},\n  "battery": 3.7\n}
+Coord1 -> MQTT: Publish\nsite/{siteId}/node/1.1/telemetry\n{\n  "nodeId": "1.1",\n  "zoneId": "1",\n  "temperature": 23.2,\n  "rgbw": {...},\n  "battery": 3.7\n}
 deactivate Coord1
 
-== Node M.N Sends Telemetry to Coordinator M (Parallel) ==
+== Zone N: Node N.N Sends Telemetry to Coordinator N (Parallel) ==
 
-NodeMN -> NodeMN: Read sensors\n(RGBW, Temp, Button,\nBattery, RSSI)
-NodeMN -> CoordM: ESP-NOW Message\nNodeStatus frame
-activate CoordM
-CoordM -> CoordM: NodeRegistry\nupdate cache
-CoordM -> MQTT: Publish\nsite/{siteId}/node/M.N/telemetry
-deactivate CoordM
+NodeNN -> NodeNN: Read sensors\n(RGBW, Temp, Button,\nBattery, RSSI)
+NodeNN -> CoordN: ESP-NOW Message\nNodeStatus frame
+activate CoordN
+CoordN -> CoordN: NodeRegistry\nupdate cache
+CoordN -> MQTT: Publish\nsite/{siteId}/node/N.N/telemetry\n{\n  "nodeId": "N.N",\n  "zoneId": "N"\n}
+deactivate CoordN
 
 == Backend Processes All Node Telemetry ==
 
-MQTT -> Backend: MQTT messages\n(from all coordinators)
+MQTT -> Backend: MQTT messages\n(from both coordinators)
 activate Backend
-Backend -> DB: Store telemetry\n(all nodes, all coordinators)
+Backend -> DB: Store telemetry\n(all nodes from Zone 1 & Zone N)
 note right of DB
   Collections:
   - telemetry_history
   - nodes (update last_seen)
+  - zones (Zone 1 & Zone N)
 end note
 Backend -> Frontend: WebSocket push\n(aggregated updates)
 deactivate Backend
 
-Frontend -> Frontend: Update dashboard\n- Node status cards\n- Temperature charts\n- Battery levels\n- All coordinators & nodes
+Frontend -> Frontend: Update dashboard\n- Zone 1 & Zone N cards\n- Temperature charts\n- Battery levels\n- All nodes per zone
 
 note right of Frontend
   Dashboard shows:
-  • All M coordinators
-  • All N nodes per coordinator
+  • Zone 1 (Coordinator 1)
+  • Zone N (Coordinator N)
+  • N nodes per zone
   • Real-time telemetry updates
-  • Historical trends
+  • Per-zone statistics
 end note
 
 @enduml

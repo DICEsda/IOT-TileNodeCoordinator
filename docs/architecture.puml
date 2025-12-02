@@ -3,8 +3,8 @@
 skinparam componentStyle rectangle
 skinparam backgroundColor #FEFEFE
 skinparam linetype ortho
-skinparam nodesep 80
-skinparam ranksep 80
+skinparam nodesep 60
+skinparam ranksep 60
 
 skinparam component {
     BackgroundColor<<coordinator>> #FFE4B5
@@ -32,77 +32,58 @@ package "Infrastructure" <<infrastructure>> {
     database [MongoDB\n---\nPort: 27017\nDatabase: iot_smarttile] as MongoDB
 }
 
-' Hardware Layer - Multiple Coordinator Groups
-together {
-    ' Coordinator 1 with its nodes
-    package "Coordinator Group 1" {
-        package "ESP32-S3 Coordinator 1" <<coordinator>> {
-            component [Coord 1\n---\nManagers:\nESP-NOW, MQTT\nWiFi, NodeRegistry\nZone, Thermal] as Coord1
-            component [Sensors\n---\nLight (ADC)\nTSL2561\nLD2450 mmWave\nNeoPixel LEDs] as Sensor1
-            Coord1 -- Sensor1
-        }
-        
-        package "Nodes (Coord 1)" <<node>> {
-            component [Node 1.1\n---\nRGBW LEDs\nTMP117] as Node11
-            component [Node 1.2\n---\nRGBW LEDs\nTMP117] as Node12
-            component [Node 1.N\n---\nRGBW LEDs\nTMP117] as Node1N
-            Node11 -[hidden]right- Node12
-            Node12 -[hidden]right- Node1N
-        }
+' Hardware Layer - Zone 1 (Coordinator 1)
+package "Zone 1" {
+    package "ESP32-S3 Coordinator 1" <<coordinator>> {
+        component [Coordinator 1\n---\nManagers:\n• ESP-NOW\n• MQTT\n• WiFi\n• NodeRegistry\n• ZoneControl\n• ThermalControl] as Coord1
+        component [Sensors\n---\n• Ambient Light (ADC)\n• TSL2561 Light\n• LD2450 mmWave\n• NeoPixel LEDs] as Sensor1
+        Coord1 -- Sensor1
     }
     
-    ' Coordinator 2 with its nodes
-    package "Coordinator Group 2" {
-        package "ESP32-S3 Coordinator 2" <<coordinator>> {
-            component [Coord 2\n---\nManagers:\nESP-NOW, MQTT\nWiFi, NodeRegistry\nZone, Thermal] as Coord2
-            component [Sensors\n---\nLight (ADC)\nTSL2561\nLD2450 mmWave\nNeoPixel LEDs] as Sensor2
-            Coord2 -- Sensor2
-        }
-        
-        package "Nodes (Coord 2)" <<node>> {
-            component [Node 2.1\n---\nRGBW LEDs\nTMP117] as Node21
-            component [Node 2.2\n---\nRGBW LEDs\nTMP117] as Node22
-            component [Node 2.N\n---\nRGBW LEDs\nTMP117] as Node2N
-            Node21 -[hidden]right- Node22
-            Node22 -[hidden]right- Node2N
-        }
-    }
-    
-    ' Coordinator M with its nodes
-    package "Coordinator Group M" {
-        package "ESP32-S3 Coordinator M" <<coordinator>> {
-            component [Coord M\n---\nManagers:\nESP-NOW, MQTT\nWiFi, NodeRegistry\nZone, Thermal] as CoordM
-            component [Sensors\n---\nLight (ADC)\nTSL2561\nLD2450 mmWave\nNeoPixel LEDs] as SensorM
-            CoordM -- SensorM
-        }
-        
-        package "Nodes (Coord M)" <<node>> {
-            component [Node M.1\n---\nRGBW LEDs\nTMP117] as NodeM1
-            component [Node M.2\n---\nRGBW LEDs\nTMP117] as NodeM2
-            component [Node M.N\n---\nRGBW LEDs\nTMP117] as NodeMN
-            NodeM1 -[hidden]right- NodeM2
-            NodeM2 -[hidden]right- NodeMN
-        }
+    package "Nodes (Zone 1)" <<node>> {
+        component [Node 1.1\n---\nRGBW LEDs\nTMP117 Temp\nButton\nBattery] as Node11
+        component [Node 1.2\n---\nRGBW LEDs\nTMP117 Temp\nButton\nBattery] as Node12
+        component [Node 1.3\n---\nRGBW LEDs\nTMP117 Temp\nButton\nBattery] as Node13
+        component [Node 1.N\n---\nRGBW LEDs\nTMP117 Temp\nButton\nBattery] as Node1N
+        Node11 -[hidden]right- Node12
+        Node12 -[hidden]right- Node13
+        Node13 -[hidden]right- Node1N
     }
 }
 
-' ESP-NOW Communication (Nodes to Coordinators)
+' Hardware Layer - Zone N (Coordinator N)
+package "Zone N" {
+    package "ESP32-S3 Coordinator N" <<coordinator>> {
+        component [Coordinator N\n---\nManagers:\n• ESP-NOW\n• MQTT\n• WiFi\n• NodeRegistry\n• ZoneControl\n• ThermalControl] as CoordN
+        component [Sensors\n---\n• Ambient Light (ADC)\n• TSL2561 Light\n• LD2450 mmWave\n• NeoPixel LEDs] as SensorN
+        CoordN -- SensorN
+    }
+    
+    package "Nodes (Zone N)" <<node>> {
+        component [Node N.1\n---\nRGBW LEDs\nTMP117 Temp\nButton\nBattery] as NodeN1
+        component [Node N.2\n---\nRGBW LEDs\nTMP117 Temp\nButton\nBattery] as NodeN2
+        component [Node N.3\n---\nRGBW LEDs\nTMP117 Temp\nButton\nBattery] as NodeN3
+        component [Node N.N\n---\nRGBW LEDs\nTMP117 Temp\nButton\nBattery] as NodeNN
+        NodeN1 -[hidden]right- NodeN2
+        NodeN2 -[hidden]right- NodeN3
+        NodeN3 -[hidden]right- NodeNN
+    }
+}
+
+' ESP-NOW Communication (Nodes to Coordinators within Zone)
 Node11 -up-> Coord1 : ESP-NOW
 Node12 -up-> Coord1 : ESP-NOW
+Node13 -up-> Coord1 : ESP-NOW
 Node1N -up-> Coord1 : ESP-NOW
 
-Node21 -up-> Coord2 : ESP-NOW
-Node22 -up-> Coord2 : ESP-NOW
-Node2N -up-> Coord2 : ESP-NOW
+NodeN1 -up-> CoordN : ESP-NOW
+NodeN2 -up-> CoordN : ESP-NOW
+NodeN3 -up-> CoordN : ESP-NOW
+NodeNN -up-> CoordN : ESP-NOW
 
-NodeM1 -up-> CoordM : ESP-NOW
-NodeM2 -up-> CoordM : ESP-NOW
-NodeMN -up-> CoordM : ESP-NOW
-
-' WiFi/MQTT Communication (All Coordinators to Broker)
-Coord1 -up-> Mosquitto : MQTT/WiFi\nsite/{siteId}/coord/1/...
-Coord2 -up-> Mosquitto : MQTT/WiFi\nsite/{siteId}/coord/2/...
-CoordM -up-> Mosquitto : MQTT/WiFi\nsite/{siteId}/coord/M/...
+' WiFi/MQTT Communication (Coordinators to Broker)
+Coord1 -up-> Mosquitto : MQTT/WiFi\nsite/{siteId}/coord/1/...\nsite/{siteId}/node/{nodeId}/...
+CoordN -up-> Mosquitto : MQTT/WiFi\nsite/{siteId}/coord/N/...\nsite/{siteId}/node/{nodeId}/...
 
 ' Backend to Infrastructure
 Mosquitto -left-> MqttClient : Subscribe\nsite/#
@@ -116,33 +97,49 @@ RestAPI -up-> Frontend : HTTP\nREST
 
 ' Notes
 note right of Coord1
-  **Each Coordinator:**
+  **Zone 1 (Coordinator 1):**
   - Manages N nodes via ESP-NOW
-  - Publishes to MQTT broker
   - Independent WiFi connection
-  - Site/Zone configuration
+  - Publishes to MQTT broker
   - Local sensor data
+  - Zone configuration
+end note
+
+note left of CoordN
+  **Zone N (Coordinator N):**
+  - Manages N nodes via ESP-NOW
+  - Independent WiFi connection
+  - Publishes to MQTT broker
+  - Local sensor data
+  - Zone configuration
 end note
 
 note left of Node11
-  **Node Telemetry:**
-  - RGBW LED states
-  - Temperature (TMP117)
-  - Button events
-  - Battery voltage
+  **Node Features:**
+  - RGBW LED control (PWM)
+  - TMP117 Temperature (±0.1°C)
+  - Button input (debounced)
+  - Battery voltage monitoring
   - RSSI signal strength
+  - Deep sleep capability
 end note
 
 note top of Mosquitto
   **MQTT Topic Hierarchy:**
   
-  Per Coordinator:
-  • site/{siteId}/coord/{coordId}/telemetry
-  • site/{siteId}/coord/{coordId}/mmwave
-  • site/{siteId}/coord/{coordId}/status
-  • site/{siteId}/coord/{coordId}/cmd
+  Coordinator 1:
+  • site/{siteId}/coord/1/telemetry
+  • site/{siteId}/coord/1/mmwave
+  • site/{siteId}/coord/1/status
+  • site/{siteId}/coord/1/cmd
   
-  Per Node (via Coordinator):
+  Coordinator N:
+  • site/{siteId}/coord/N/telemetry
+  • site/{siteId}/coord/N/mmwave
+  • site/{siteId}/coord/N/status
+  • site/{siteId}/coord/N/cmd
+  
+  Nodes (via Coordinators):
   • site/{siteId}/node/{nodeId}/telemetry
   • site/{siteId}/node/{nodeId}/cmd
 end note
@@ -150,29 +147,31 @@ end note
 note bottom of MongoDB
   **MongoDB Collections:**
   - sites (1 per deployment)
-  - coordinators (M per site)
+  - coordinators (2: Zone 1 & Zone N)
   - nodes (N per coordinator)
-  - telemetry_history
-  - zones
-  - commands_log
-  - events
+  - telemetry_history (time-series)
+  - zones (zone definitions)
+  - commands_log (audit trail)
+  - events (system events)
+  - mmwave_events (presence detection)
 end note
 
 ' Legend
 legend bottom left
   |= Color |= Component Type |
-  | <<coordinator>> | ESP32-S3 Coordinators (M instances) |
-  | <<node>> | ESP32-C3 Nodes (N per coordinator) |
+  | <<coordinator>> | ESP32-S3 Coordinators (2 zones) |
+  | <<node>> | ESP32-C3 Nodes (N per zone) |
   | <<backend>> | Go Backend Services |
   | <<frontend>> | Angular Web Dashboard |
   | <<infrastructure>> | MQTT Broker & Database |
   
-  **Architecture:**
-  • M Coordinators per Site
-  • N Nodes per Coordinator
+  **Architecture Overview:**
+  • 2 Coordinators (Zone 1 & Zone N)
+  • N Nodes per Coordinator/Zone
   • Each Coordinator = Independent ESP-NOW mesh
-  • All Coordinators → Same MQTT Broker
+  • Both Coordinators → Same MQTT Broker
   • Centralized Backend & Frontend
+  • 1 Site with 2 Zones
 endlegend
 
 @enduml

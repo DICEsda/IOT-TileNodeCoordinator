@@ -4,28 +4,29 @@
 skinparam sequenceMessageAlign center
 skinparam backgroundColor #FEFEFE
 
-title Node Pairing Flow (Coordinator-Specific)
+title Node Pairing Flow (Zone 1)
 
 actor User
 participant "Angular\nFrontend" as Frontend
 participant "Go Backend\nREST API" as Backend
 participant "MongoDB" as DB
 participant "Mosquitto\nMQTT Broker" as MQTT
-participant "ESP32-S3\nCoordinator 1" as Coord1
+participant "ESP32-S3\nCoordinator 1\n(Zone 1)" as Coord1
 participant "ESP32-C3\nNew Node" as Node
 
 note over User, Node
+  2 Zones: Zone 1 and Zone N
   Each coordinator pairs independently
-  Nodes belong to specific coordinator
+  Nodes belong to specific zone/coordinator
   NodeRegistry stored in coordinator NVS
 end note
 
 == User Initiates Pairing Mode ==
 
-User -> Frontend: Select Coordinator 1\nClick "Start Pairing (60s)"
+User -> Frontend: Select Zone 1 (Coordinator 1)\nClick "Start Pairing (60s)"
 Frontend -> Backend: HTTP POST\n/api/coordinators/1/pairing\n{\n  "duration_ms": 60000\n}
 activate Backend
-Backend -> Backend: Validate coordinator exists
+Backend -> Backend: Validate Zone 1 coordinator exists
 Backend -> MQTT: Publish\nsite/{siteId}/coord/1/cmd\n{\n  "cmd": "pair",\n  "duration_ms": 60000\n}
 deactivate Backend
 
@@ -45,9 +46,9 @@ Coord1 -> MQTT: Publish\nsite/{siteId}/coord/1/status\n{"pairing": "active"}
 deactivate Coord1
 
 MQTT -> Backend: Status update
-Backend -> Frontend: WebSocket\n{"coordId": "1", "pairing": "active"}
-Frontend -> Frontend: Show countdown timer\n"Pairing active: 60s"
-Frontend -> User: Visual indication\nBlue pulsing icon
+Backend -> Frontend: WebSocket\n{"coordId": "1", "zoneId": "1", "pairing": "active"}
+Frontend -> Frontend: Show countdown timer\n"Zone 1 Pairing active: 60s"
+Frontend -> User: Visual indication\nZone 1 card pulsing blue
 
 == Node Powers On and Initiates Pairing ==
 
@@ -97,8 +98,8 @@ end note
 Backend -> Frontend: WebSocket update\n{\n  "event": "nodeAdded",\n  "nodeId": "1.6",\n  "coordId": "1"\n}
 deactivate Backend
 
-Frontend -> Frontend: Add node to UI\n- Update coordinator card\n- Show new node in list
-Frontend -> User: Notification\n"✓ Node 1.6 paired to Coordinator 1"
+Frontend -> Frontend: Add node to UI\n- Update Zone 1 card\n- Show new node in Zone 1 list
+Frontend -> User: Notification\n"✓ Node 1.6 paired to Zone 1"
 
 == Pairing Window Closes ==
 
