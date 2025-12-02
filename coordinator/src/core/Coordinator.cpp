@@ -583,6 +583,17 @@ void Coordinator::handleNodeMessage(const String& nodeId, const uint8_t* data, s
             
             delete msg;
         }
+        
+        // Send ACK back to node to keep connection alive
+        uint8_t mac[6];
+        if (EspNow::macStringToBytes(nodeId, mac)) {
+            AckMessage ack;
+            ack.cmd_id = "telemetry_ack";
+            String ackJson = ack.toJson();
+            if (!espNow->sendToMac(mac, ackJson)) {
+                Logger::debug("Failed to send telemetry ACK to %s", nodeId.c_str());
+            }
+        }
     }
 }
 

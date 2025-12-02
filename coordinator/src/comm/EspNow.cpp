@@ -540,17 +540,14 @@ bool EspNow::addPeer(const uint8_t mac[6]) {
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     String smac(macStr);
     
-    // Get current WiFi channel (will match router channel when connected)
-    uint8_t currentChannel = 1;
-    wifi_second_chan_t second = WIFI_SECOND_CHAN_NONE;
-    esp_wifi_get_channel(&currentChannel, &second);
-    
-    Logger::info("Adding peer %s on channel %d", macStr, currentChannel);
+    // Use channel 0 to communicate on current interface channel
+    // This ensures communication works regardless of WiFi channel changes
+    Logger::info("Adding peer %s with channel 0 (auto-current)", macStr);
     
     // Always try to add peer to ESP-NOW (it will return EXIST if already there)
     esp_now_peer_info_t peerInfo = {};
     memcpy(peerInfo.peer_addr, mac, 6);
-    peerInfo.channel = currentChannel; // Use actual WiFi channel (router's channel)
+    peerInfo.channel = 0; // Use 0 = current interface channel (adapts to WiFi changes)
     peerInfo.encrypt = false; // ✓ Checklist: Encryption disabled
     peerInfo.ifidx = WIFI_IF_STA;
     
@@ -568,7 +565,7 @@ bool EspNow::addPeer(const uint8_t mac[6]) {
             peers.push_back(smac);
             savePeersToStorage();
         }
-        Logger::info("✓ Peer registered: %s on channel %d", macStr, currentChannel);
+        Logger::info("✓ Peer registered: %s (channel 0 = auto)", macStr);
         return true;
     } else if (res == ESP_ERR_ESPNOW_EXIST) {
         // Already exists in ESP-NOW - ensure it's in our cache

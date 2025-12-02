@@ -5,7 +5,7 @@ import { Node, Coordinator } from '../../../core/models/api.models';
 
 interface GraphNode extends d3.SimulationNodeDatum {
   id: string;
-  type: 'coordinator' | 'node' | 'backend' | 'frontend' | 'mongodb';
+  type: 'coordinator' | 'node' | 'backend' | 'frontend' | 'mongodb' | 'mqtt';
   name: string;
   status: string;
   data?: any;
@@ -35,6 +35,7 @@ interface GraphLink extends d3.SimulationLinkDatum<GraphNode> {
           <span class="item"><span class="dot backend"></span> Backend</span>
           <span class="item"><span class="dot frontend"></span> Frontend</span>
           <span class="item"><span class="dot mongodb"></span> MongoDB</span>
+          <span class="item"><span class="dot mqtt"></span> MQTT</span>
         </div>
       </div>
     </div>
@@ -83,6 +84,7 @@ interface GraphLink extends d3.SimulationLinkDatum<GraphNode> {
             &.backend { background: #ff9800; }
             &.frontend { background: #9c27b0; }
             &.mongodb { background: #00897b; }
+            &.mqtt { background: #e91e63; }
           }
         }
       }
@@ -94,6 +96,7 @@ export class NetworkGraphComponent implements OnInit, OnChanges, OnDestroy {
   @Input() coordinators: Coordinator[] = [];
   @Input() backendHealthy: boolean = false;
   @Input() dbHealthy: boolean = false;
+  @Input() mqttHealthy: boolean = false;
   @Input() frontendHealthy: boolean = true;
 
   @ViewChild('graphContainer', { static: true }) container!: ElementRef;
@@ -165,6 +168,13 @@ export class NetworkGraphComponent implements OnInit, OnChanges, OnDestroy {
       status: this.frontendHealthy ? 'online' : 'offline'
     });
 
+    graphNodes.push({
+      id: 'mqtt',
+      type: 'mqtt',
+      name: 'MQTT',
+      status: this.mqttHealthy ? 'online' : 'offline'
+    });
+
     // Add infrastructure links
     graphLinks.push({
       source: 'mongodb',
@@ -175,6 +185,13 @@ export class NetworkGraphComponent implements OnInit, OnChanges, OnDestroy {
     graphLinks.push({
       source: 'backend',
       target: 'frontend',
+      value: 1
+    });
+
+    // Backend connects to MQTT
+    graphLinks.push({
+      source: 'backend',
+      target: 'mqtt',
       value: 1
     });
 
@@ -193,9 +210,9 @@ export class NetworkGraphComponent implements OnInit, OnChanges, OnDestroy {
         data: realCoord
       });
 
-      // Link coordinator to backend
+      // Link coordinator to MQTT (coordinators connect via MQTT broker)
       graphLinks.push({
-        source: 'backend',
+        source: 'mqtt',
         target: coordId,
         value: 1
       });
@@ -227,25 +244,28 @@ export class NetworkGraphComponent implements OnInit, OnChanges, OnDestroy {
     // Calculate fixed positions for hierarchical layout (well-spaced)
     graphNodes.forEach(node => {
       if (node.type === 'mongodb') {
-        node.x = this.width * 0.25;
+        node.x = this.width * 0.18;
         node.y = this.height * 0.18;
       } else if (node.type === 'backend') {
-        node.x = this.width * 0.42;
-        node.y = this.height * 0.38;
+        node.x = this.width * 0.35;
+        node.y = this.height * 0.18;
       } else if (node.type === 'frontend') {
-        node.x = this.width * 0.58;
-        node.y = this.height * 0.38;
+        node.x = this.width * 0.52;
+        node.y = this.height * 0.18;
+      } else if (node.type === 'mqtt') {
+        node.x = this.width * 0.50;
+        node.y = this.height * 0.42;
       } else if (node.type === 'coordinator') {
         const coordIndex = parseInt(node.id.replace('coord00', '')) - 1;
         node.x = this.width * (0.23 + coordIndex * 0.17);
-        node.y = this.height * 0.6;
+        node.y = this.height * 0.65;
       } else if (node.type === 'node') {
         const match = node.id.match(/coord00(\d)_node(\d)/);
         if (match) {
           const coordIndex = parseInt(match[1]) - 1;
           const nodeIndex = parseInt(match[2]) - 1;
           node.x = this.width * (0.23 + coordIndex * 0.17) + (nodeIndex - 2) * 22;
-          node.y = this.height * 0.82;
+          node.y = this.height * 0.85;
         }
       }
     });
@@ -291,7 +311,7 @@ export class NetworkGraphComponent implements OnInit, OnChanges, OnDestroy {
       .attr('cy', (d: GraphNode) => d.y || 0)
       .attr('r', (d: GraphNode) => {
         if (d.type === 'coordinator') return 10;
-        if (['backend', 'frontend', 'mongodb'].includes(d.type)) return 12;
+        if (['backend', 'frontend', 'mongodb', 'mqtt'].includes(d.type)) return 12;
         return 6;
       })
       .attr('fill', (d: GraphNode) => {
@@ -299,6 +319,7 @@ export class NetworkGraphComponent implements OnInit, OnChanges, OnDestroy {
         if (d.type === 'backend') return d.status === 'online' ? '#ff9800' : '#666';
         if (d.type === 'frontend') return d.status === 'online' ? '#9c27b0' : '#666';
         if (d.type === 'mongodb') return d.status === 'online' ? '#00897b' : '#666';
+        if (d.type === 'mqtt') return d.status === 'online' ? '#e91e63' : '#666';
         return d.status === 'online' ? '#2196f3' : '#666';
       })
       .attr('opacity', (d: GraphNode) => d.status === 'online' ? 1 : 0.5);

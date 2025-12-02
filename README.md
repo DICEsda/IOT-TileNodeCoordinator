@@ -19,13 +19,13 @@
 **Technologies:** ESP-NOW, MQTT, Go, Angular, Docker
 
 **Technologies & Features:**
-- 🔌 **Hardware:** `ESP32-S3` `ESP32-C3` `ESP-NOW Protocol` `RGBW LED` `TMP117` `TSL2561` `LD2450 mmWave`
-- 🌐 **Networking:** `MQTT` `WebSocket` `REST API` `Mesh Networking` `Wireless Sensor Network`
-- 💻 **Backend:** `Go` `MongoDB` `Docker` `Time-Series Database`
-- 🎨 **Frontend:** `Angular` `TypeScript` `Real-Time Dashboard` `Data Visualization`
-- ⚡ **Features:** `Smart Lighting` `Zone Control` `Presence Detection` `Temperature Monitoring` `Battery Monitoring` `OTA Updates` `Deep Sleep` `Low Power`
-- 🏠 **Application:** `Home Automation` `IoT` `Embedded Systems`
-- 📐 **Tools:** `PlatformIO` `Arduino` `PlantUML` `NVS Storage`
+- **Hardware:** `ESP32-S3` `ESP32-C3` `ESP-NOW Protocol` `RGBW LED` `TMP117` `TSL2561` `LD2450 mmWave`
+- **Networking:** `MQTT` `WebSocket` `REST API` `Mesh Networking` `Wireless Sensor Network`
+- **Backend:** `Go` `MongoDB` `Docker` `Time-Series Database`
+- **Frontend:** `Angular` `TypeScript` `Real-Time Dashboard` `Data Visualization`
+- **Features:** `Smart Lighting` `Zone Control` `Presence Detection` `Temperature Monitoring` `Battery Monitoring` `OTA Updates` `Deep Sleep` `Low Power`
+- **Application:** `Home Automation` `IoT` `Embedded Systems`
+- **Tools:** `PlatformIO` `Arduino` `PlantUML` `NVS Storage`
 
 An intelligent IoT lighting system utilizing ESP-NOW for mesh networking between ESP32 nodes and a coordinator, with real-time monitoring, MQTT integration, and web-based control interface.
 

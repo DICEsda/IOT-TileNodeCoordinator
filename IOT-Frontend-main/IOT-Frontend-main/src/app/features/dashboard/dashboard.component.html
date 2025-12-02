@@ -112,6 +112,7 @@
             [coordinators]="registeredCoordinators()"
             [backendHealthy]="data.apiHealthy()"
             [dbHealthy]="data.dbHealthy()"
+            [mqttHealthy]="data.mqttBrokerHealthy()"
             [frontendHealthy]="true">
           </app-network-graph>
         </div>

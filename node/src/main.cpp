@@ -219,6 +219,10 @@ private:
     // ESP-NOW
     uint8_t coordinatorMac[6];
     bool espNowInitialized;
+    uint8_t currentScanChannel;      // Current index in channel scan order
+    uint32_t lastChannelScanTime;    // Last time we switched channels
+    static constexpr uint8_t SCAN_CHANNELS[] = {1, 6, 11, 2, 3, 4, 5, 7, 8, 9, 10, 12, 13};
+    static constexpr uint8_t NUM_SCAN_CHANNELS = 13;
     
     // RGBW LED strip
     LedController leds{4}; // PRD: 4 pixels per node
@@ -236,6 +240,10 @@ private:
     uint16_t rxPeriodMs;
     uint32_t lastTelemetry;
     uint16_t telemetryInterval;
+    
+    // Channel management
+    bool channelLocked = false; // Set to true once we find coordinator
+    uint8_t lockedChannel = 0;  // The channel we locked to
     
     // Button
     ButtonInput button;
@@ -317,12 +325,14 @@ SmartTileNode::SmartTileNode()
     : currentState(NodeState::PAIRING)
     , config("node")
     , espNowInitialized(false)
+    , currentScanChannel(0)
+    , lastChannelScanTime(0)
     , tempSensorAvailable(false)
     , lastRxWindow(0)
     , rxWindowMs(20)
     , rxPeriodMs(100)
     , lastTelemetry(0)
-    , telemetryInterval(1)  // 1 second for real-time updates
+    , telemetryInterval(2)  // 2 seconds - balance between real-time updates and channel load
     , pairingStartTime(0)
     , inPairingMode(false)
     , firmwareVersion("c3-1.0.0")
@@ -464,9 +474,41 @@ void SmartTileNode::handlePairing() {
         return;
     }
     
+    // Channel scanning DISABLED - hardcoded to channel 1 to match coordinator
+    // No need to scan channels since coordinator is always on channel 1
+    
+    // Channel hop during pairing to find coordinator (only if not locked)
+    static uint32_t lastChannelHop = 0;
+    static uint8_t currentChannelIndex = 0;
+    static const uint8_t CHANNELS[] = {1, 6, 11, 2, 3, 4, 5, 7, 8, 9, 10};
+    static const int NUM_CHANNELS = sizeof(CHANNELS) / sizeof(CHANNELS[0]);
+    
+    // Only hop channels if we haven't locked onto coordinator yet
+    if (!channelLocked && millis() - lastChannelHop > 500) {
+        currentChannelIndex = (currentChannelIndex + 1) % NUM_CHANNELS;
+        uint8_t newChannel = CHANNELS[currentChannelIndex];
+        
+        esp_wifi_set_promiscuous(true);
+        esp_wifi_set_channel(newChannel, WIFI_SECOND_CHAN_NONE);
+        esp_wifi_set_promiscuous(false);
+        
+        // Update broadcast peer to use channel 0 (current)
+        uint8_t bcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+        esp_now_del_peer(bcast);
+        esp_now_peer_info_t peerInfo = {};
+        memcpy(peerInfo.peer_addr, bcast, 6);
+        peerInfo.channel = 0;
+        peerInfo.encrypt = false;
+        peerInfo.ifidx = WIFI_IF_STA;
+        esp_now_add_peer(&peerInfo);
+        
+        logMessage("DEBUG", String("Channel hop to ") + String(newChannel));
+        lastChannelHop = millis();
+    }
+    
     // Send join request periodically during pairing
     static uint32_t lastJoinRequest = 0;
-    if (millis() - lastJoinRequest > 5000) { // Every 5 seconds
+    if (millis() - lastJoinRequest > 600) { // Every 600ms to sync with channel hops
         JoinRequestMessage joinReq;
         joinReq.mac = getMacAddress();
         joinReq.fw = firmwareVersion;
@@ -486,7 +528,10 @@ void SmartTileNode::handlePairing() {
         }
         
         // Log the actual payload being sent
-        logMessage("INFO", String("Sending JOIN_REQUEST: ") + payload);
+        uint8_t curCh = 0;
+        wifi_second_chan_t sec;
+        esp_wifi_get_channel(&curCh, &sec);
+        logMessage("INFO", String("Sending JOIN_REQUEST on ch") + String(curCh) + ": " + payload);
         
         // Send to broadcast MAC address using native ESP-NOW v2
         uint8_t broadcastMac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
@@ -566,40 +611,26 @@ bool SmartTileNode::initEspNow() {
     }
     logMessage("INFO", "  ESP-NOW v2.0 initialized");
     
-    // CRITICAL: Scan all WiFi channels to find coordinator
-    // The coordinator operates on its WiFi router's channel (often 1, 6, or 11)
-    logMessage("INFO", "[4/9] Scanning channels 1-13 for coordinator ESP-NOW broadcasts...");
-    uint8_t foundChannel = 0;
+    // Scan common WiFi channels to find coordinator
+    // The coordinator's channel depends on the WiFi router it's connected to
+    logMessage("INFO", "[4/9] Scanning for coordinator channel...");
     
-    // Common WiFi channels to check first
-    uint8_t priorityChannels[] = {11, 6, 1}; // 11 is most common for 2.4GHz
-    uint8_t allChannels[] = {11, 6, 1, 2, 3, 4, 5, 7, 8, 9, 10, 12, 13};
+    // Common non-overlapping WiFi channels (most routers use one of these)
+    static const uint8_t CHANNELS_TO_SCAN[] = {1, 6, 11, 2, 3, 4, 5, 7, 8, 9, 10, 12, 13};
+    static const int NUM_CHANNELS = sizeof(CHANNELS_TO_SCAN) / sizeof(CHANNELS_TO_SCAN[0]);
     
-    // Simple heuristic: assume coordinator is on channel 11 if WiFi is typically on 11
-    // TODO: Implement proper ESP-NOW beacon scanning
-    foundChannel = 11;
-    logMessage("INFO", String("  Assuming coordinator on channel 11 (common default)"));
+    uint8_t foundChannel = 1; // Default to channel 1
     
-    // Set WiFi channel
-    logMessage("INFO", String("  Setting channel to ") + String(foundChannel));
+    // Start with channel 1 as default - we'll update when we receive from coordinator
     esp_wifi_set_promiscuous(true);
-    esp_err_t chRes = esp_wifi_set_channel(foundChannel, WIFI_SECOND_CHAN_NONE);
+    esp_err_t chRes = esp_wifi_set_channel(1, WIFI_SECOND_CHAN_NONE);
     esp_wifi_set_promiscuous(false);
     
     uint8_t primary = 0; 
     wifi_second_chan_t second = WIFI_SECOND_CHAN_NONE;
     esp_wifi_get_channel(&primary, &second);
     
-    if (primary != foundChannel) {
-        logMessage("ERROR", String("Failed to set channel! Expected ") + String(foundChannel) + ", got: " + String((int)primary));
-        // Try channel 1 as fallback
-        logMessage("WARN", "  Falling back to channel 1");
-        esp_wifi_set_promiscuous(true);
-        esp_wifi_set_channel(1, WIFI_SECOND_CHAN_NONE);
-        esp_wifi_set_promiscuous(false);
-        esp_wifi_get_channel(&primary, &second);
-    }
-    logMessage("INFO", String("  Channel: ") + String((int)primary));
+    logMessage("INFO", String("  Starting on channel ") + String((int)primary) + " (will auto-detect from coordinator)");
     
     // Set WiFi protocol for compatibility
     logMessage("INFO", "[5/9] Setting WiFi protocol...");
@@ -632,13 +663,13 @@ bool SmartTileNode::initEspNow() {
     
     esp_now_peer_info_t peerInfo = {};
     memcpy(peerInfo.peer_addr, bcast, 6);
-    peerInfo.channel = primary; // Use the channel we just set
+    peerInfo.channel = 0; // 0 = use current interface channel (most flexible)
     peerInfo.encrypt = false;
     peerInfo.ifidx = WIFI_IF_STA;
     
     esp_err_t bres = esp_now_add_peer(&peerInfo);
     if (bres == ESP_OK || bres == ESP_ERR_ESPNOW_EXIST) {
-        logMessage("INFO", "  Broadcast peer added (FF:FF:FF:FF:FF:FF)");
+        logMessage("INFO", "  Broadcast peer added (FF:FF:FF:FF:FF:FF) on channel 0");
     } else {
         logMessage("ERROR", String("Failed to add broadcast peer: ") + String((int)bres));
     }
@@ -663,11 +694,54 @@ void SmartTileNode::onDataRecv(const uint8_t* mac, const uint8_t* data, int len)
     String message = String((char*)data, len);
     logMessage("DEBUG", String("RX data: ") + message);
     
-    // remember coordinator mac if unknown
-    if (mac && (coordinatorMac[0] == 0 && coordinatorMac[1] == 0 && coordinatorMac[2] == 0 && coordinatorMac[3] == 0 && coordinatorMac[4] == 0 && coordinatorMac[5] == 0)) {
-        memcpy(coordinatorMac, mac, 6);
-        logMessage("INFO", String("Learned coordinator MAC: ") + String(macStr));
+    // Get the channel we received this message on - this is the coordinator's channel!
+    uint8_t rxChannel = 0;
+    wifi_second_chan_t sec;
+    esp_wifi_get_channel(&rxChannel, &sec);
+    
+    // Lock channel once we receive from coordinator (stops channel hopping)
+    if (!channelLocked && rxChannel > 0) {
+        channelLocked = true;
+        lockedChannel = rxChannel;
+        logMessage("INFO", String("CHANNEL LOCKED to ") + String(rxChannel) + " - coordinator found!");
     }
+    
+    // Remember coordinator MAC
+    bool isNewCoordinator = (coordinatorMac[0] == 0 && coordinatorMac[1] == 0 && 
+                             coordinatorMac[2] == 0 && coordinatorMac[3] == 0 && 
+                             coordinatorMac[4] == 0 && coordinatorMac[5] == 0);
+    
+    if (mac) {
+        if (isNewCoordinator) {
+            memcpy(coordinatorMac, mac, 6);
+            logMessage("INFO", String("Learned coordinator MAC: ") + String(macStr) + " on channel " + String(rxChannel));
+        }
+        
+        // Ensure coordinator peer is registered with channel 0 (current interface channel)
+        // Channel 0 means "use the current WiFi interface channel" which is most reliable
+        esp_now_peer_info_t peerInfo = {};
+        if (esp_now_get_peer(coordinatorMac, &peerInfo) == ESP_OK) {
+            // Peer exists - check if channel needs update to 0
+            if (peerInfo.channel != 0) {
+                esp_now_del_peer(coordinatorMac);
+                memcpy(peerInfo.peer_addr, coordinatorMac, 6);
+                peerInfo.channel = 0; // 0 = use current interface channel
+                peerInfo.encrypt = false;
+                peerInfo.ifidx = WIFI_IF_STA;
+                esp_now_add_peer(&peerInfo);
+                logMessage("INFO", String("Updated coordinator peer to channel 0"));
+            }
+        } else {
+            // Peer doesn't exist - add it with channel 0
+            memcpy(peerInfo.peer_addr, coordinatorMac, 6);
+            peerInfo.channel = 0; // 0 = use current interface channel
+            peerInfo.encrypt = false;
+            peerInfo.ifidx = WIFI_IF_STA;
+            esp_now_add_peer(&peerInfo);
+            logMessage("INFO", String("Added coordinator peer on channel 0"));
+        }
+    }
+    
     // mark RX window and coordinator response
     lastRxWindow = millis();
     lastCoordinatorResponse = millis();
@@ -766,11 +840,17 @@ void SmartTileNode::processReceivedMessage(const String& json) {
             SetLightMessage* setLight = static_cast<SetLightMessage*>(message);
             // Accept command if light_id matches OR if light_id is empty (broadcast/any)
             if (setLight->light_id == lightId || setLight->light_id.isEmpty()) {
-                // If we're in PAIRING but receiving commands, the coordinator knows us - go OPERATIONAL
-                if (currentState == NodeState::PAIRING || inPairingMode) {
-                    logMessage("INFO", "Received command while pairing - switching to OPERATIONAL");
+                // Only transition to OPERATIONAL if we have valid credentials (received JOIN_ACCEPT before)
+                // This prevents incorrect transitions from stray broadcasts
+                if ((currentState == NodeState::PAIRING || inPairingMode) && !lightId.isEmpty()) {
+                    logMessage("INFO", "Received command while pairing with valid credentials - switching to OPERATIONAL");
                     currentState = NodeState::OPERATIONAL;
                     stopPairing();
+                } else if (currentState == NodeState::PAIRING && lightId.isEmpty()) {
+                    // Ignore commands if we don't have a lightId yet - wait for JOIN_ACCEPT
+                    logMessage("WARN", "Ignoring set_light - no lightId yet, waiting for JOIN_ACCEPT");
+                    delete message;
+                    return;
                 }
                 
                 // Always clear status animation when receiving manual commands
@@ -807,6 +887,13 @@ void SmartTileNode::processReceivedMessage(const String& json) {
                 
                 logMessage("INFO", "Received set_light command");
             }
+            break;
+        }
+        case MessageType::ACK: {
+            // Coordinator acknowledged our telemetry - reset connection timeout
+            lastCoordinatorResponse = millis();
+            telemetrySentCount = 0;
+            logMessage("DEBUG", "Received ACK from coordinator");
             break;
         }
         default:
@@ -951,7 +1038,7 @@ bool SmartTileNode::sendMessage(const EspNowMessage& message, const uint8_t* des
         // Add peer if it doesn't exist
         esp_now_peer_info_t peerInfo = {};
         memcpy(peerInfo.peer_addr, target, 6);
-        peerInfo.channel = 0; // Use current channel
+        peerInfo.channel = 0; // 0 = use current interface channel (most reliable)
         peerInfo.encrypt = false;
         peerInfo.ifidx = WIFI_IF_STA;
         
@@ -960,6 +1047,7 @@ bool SmartTileNode::sendMessage(const EspNowMessage& message, const uint8_t* des
             logMessage("WARN", String("Failed to add peer: ") + String((int)addRes));
             return false;
         }
+        logMessage("INFO", String("Added peer on channel 0"));
     }
     
     // ✓ Checklist: Use native ESP-NOW v2 API

@@ -344,14 +344,23 @@ export class DataService implements OnDestroy {
    * Start pairing mode on coordinator
    */
   async startPairing(siteId: string, coordId: string, durationMs: number = 60000): Promise<void> {
-    // Commands go via API/WebSocket, not direct MQTT
-    // if (this.mqtt.connected()) {
-    //   this.mqtt.sendCoordinatorCommand(siteId, coordId, {
-    //     cmd: 'pair',
-    //     duration_ms: durationMs
-    //   });
-    // }
-    console.warn('[DataService] startPairing not implemented via WebSocket');
+    try {
+      // Use API endpoint which publishes to MQTT
+      await new Promise<void>((resolve, reject) => {
+        this.api.startPairing(siteId, coordId, durationMs / 1000).subscribe({
+          next: () => {
+            if (this.env.isDevelopment) {
+              console.log('[DataService] Pairing mode started:', { siteId, coordId, durationMs });
+            }
+            resolve();
+          },
+          error: (err) => reject(err)
+        });
+      });
+    } catch (error) {
+      console.error('[DataService] Failed to start pairing:', error);
+      throw error;
+    }
   }
 
   /**
