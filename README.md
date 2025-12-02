@@ -57,8 +57,16 @@ The IOT Smart Tile System is a distributed embedded IoT platform designed for in
 ## System Architecture
 
 See PlantUML diagrams in `docs/` directory:
-- `architecture.puml` - System component architecture and MQTT topics
-- `dataflow.puml` - Detailed sequence diagrams for telemetry, commands, and pairing
+
+**System Architecture:**
+- `architecture.puml` - Component architecture (M coordinators with N nodes each, MQTT topics, database schema)
+
+**Data Flow Sequence Diagrams:**
+- `dataflow-telemetry-uplink.puml` - Node telemetry to backend flow
+- `dataflow-coordinator-telemetry.puml` - Coordinator sensor data flow
+- `dataflow-command-downlink.puml` - Frontend commands to nodes
+- `dataflow-pairing.puml` - Node pairing process
+- `dataflow-historical-query.puml` - Historical data retrieval and visualization
 
 ## Hardware
 

@@ -1,0 +1,90 @@
+@startuml Historical Data Query Flow
+
+!theme plain
+skinparam sequenceMessageAlign center
+skinparam backgroundColor #FEFEFE
+
+title Historical Data Query Flow
+
+actor User
+participant "Angular\nFrontend" as Frontend
+participant "Go Backend\nREST API" as Backend
+participant "MongoDB" as DB
+
+note over User, DB
+  User requests historical telemetry data
+  Backend queries time-series data from MongoDB
+  Frontend renders charts and trends
+end note
+
+== User Requests Historical Data ==
+
+User -> Frontend: Navigate to History View\nSelect "Last 24 hours"
+Frontend -> Frontend: Calculate time range\nstart = now - 24h\nend = now
+
+Frontend -> Frontend: Build query parameters\n{\n  "siteId": "site001",\n  "start": "2024-12-01T16:00:00Z",\n  "end": "2024-12-02T16:00:00Z",\n  "metrics": ["temperature", "light"],\n  "coordinators": ["1", "2"],\n  "interval": "5m"\n}
+
+Frontend -> Backend: HTTP GET\n/api/sites/{siteId}/telemetry?\nstart=...&end=...&\nmetrics=temperature,light&\ncoordinators=1,2&\ninterval=5m
+
+== Backend Queries Database ==
+
+activate Backend
+Backend -> Backend: Validate parameters\n- Time range valid?\n- User has access?\n- Coordinators exist?
+
+Backend -> DB: Query telemetry_history\ndb.telemetry_history.aggregate([\n  {$match: {\n    siteId: "site001",\n    timestamp: {$gte: start, $lte: end},\n    coordId: {$in: ["1", "2"]}\n  }},\n  {$group: {\n    _id: {$dateToString: {\n      format: "%Y-%m-%dT%H:%M",\n      date: "$timestamp"\n    }},\n    avgTemp: {$avg: "$temperature"},\n    avgLight: {$avg: "$light"}\n  }},\n  {$sort: {_id: 1}}\n])
+
+activate DB
+DB -> DB: Execute aggregation\n- Filter by time range\n- Group by 5-minute intervals\n- Calculate averages\n- Sort by timestamp
+DB -> Backend: Return results\n[\n  {\n    "timestamp": "2024-12-01T16:00",\n    "avgTemp": 22.3,\n    "avgLight": 445\n  },\n  {\n    "timestamp": "2024-12-01T16:05",\n    "avgTemp": 22.5,\n    "avgLight": 448\n  },\n  ...\n]
+deactivate DB
+
+note right of DB
+  Optimizations:
+  • Indexed on timestamp
+  • Aggregation pipeline
+  • Pre-computed averages
+  • Efficient time-series queries
+end note
+
+== Backend Processes and Returns Data ==
+
+Backend -> Backend: Format response\n- Add metadata\n- Calculate statistics\n- Prepare JSON
+
+Backend -> Frontend: HTTP 200 OK\n{\n  "siteId": "site001",\n  "timeRange": {...},\n  "coordinators": ["1", "2"],\n  "data": [\n    {"timestamp": ..., "avgTemp": 22.3, ...},\n    ...\n  ],\n  "stats": {\n    "minTemp": 21.8,\n    "maxTemp": 23.4,\n    "avgTemp": 22.6\n  },\n  "dataPoints": 288\n}
+deactivate Backend
+
+== Frontend Renders Charts ==
+
+Frontend -> Frontend: Process time-series data\n- Parse timestamps\n- Prepare chart datasets\n- Configure chart options
+
+Frontend -> Frontend: Render temperature chart\n(Line chart with Highcharts/Chart.js)\n- X-axis: Time (24h)\n- Y-axis: Temperature (°C)\n- Multiple series (Coord 1, Coord 2)
+
+Frontend -> Frontend: Render light intensity chart\n(Area chart)\n- X-axis: Time\n- Y-axis: Light (lux)
+
+Frontend -> Frontend: Display statistics\n- Min/Max/Avg values\n- Data quality indicators\n- Missing data gaps
+
+Frontend -> User: Show interactive charts\n- Zoom/pan enabled\n- Tooltip on hover\n- Export options (CSV, PNG)
+
+== User Explores Data ==
+
+User -> Frontend: Hover over data point
+Frontend -> Frontend: Show tooltip\n"Time: 18:30\nCoord 1 Temp: 22.8°C\nCoord 2 Temp: 23.1°C"
+Frontend -> User: Display tooltip
+
+User -> Frontend: Zoom into 2-hour range
+Frontend -> Frontend: Redraw chart\n(client-side zoom)
+
+note right of Frontend
+  Frontend features:
+  • Interactive charts
+  • Real-time updates
+  • Export data
+  • Compare coordinators
+  • Anomaly detection
+end note
+
+User -> Frontend: Click "Export CSV"
+Frontend -> Frontend: Convert data to CSV\nTimestamp,Coord1_Temp,Coord2_Temp,...
+Frontend -> User: Download file\ntelemetry_24h.csv
+
+@enduml

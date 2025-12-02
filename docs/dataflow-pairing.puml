@@ -1,0 +1,118 @@
+@startuml Node Pairing Flow
+
+!theme plain
+skinparam sequenceMessageAlign center
+skinparam backgroundColor #FEFEFE
+
+title Node Pairing Flow (Coordinator-Specific)
+
+actor User
+participant "Angular\nFrontend" as Frontend
+participant "Go Backend\nREST API" as Backend
+participant "MongoDB" as DB
+participant "Mosquitto\nMQTT Broker" as MQTT
+participant "ESP32-S3\nCoordinator 1" as Coord1
+participant "ESP32-C3\nNew Node" as Node
+
+note over User, Node
+  Each coordinator pairs independently
+  Nodes belong to specific coordinator
+  NodeRegistry stored in coordinator NVS
+end note
+
+== User Initiates Pairing Mode ==
+
+User -> Frontend: Select Coordinator 1\nClick "Start Pairing (60s)"
+Frontend -> Backend: HTTP POST\n/api/coordinators/1/pairing\n{\n  "duration_ms": 60000\n}
+activate Backend
+Backend -> Backend: Validate coordinator exists
+Backend -> MQTT: Publish\nsite/{siteId}/coord/1/cmd\n{\n  "cmd": "pair",\n  "duration_ms": 60000\n}
+deactivate Backend
+
+== Coordinator Enters Pairing Mode ==
+
+MQTT -> Coord1: Pairing command
+activate Coord1
+Coord1 -> Coord1: NodeRegistry\nstartPairing()
+Coord1 -> Coord1: EspNowManager\nenablePairingMode()
+Coord1 -> Coord1: Status LED\npulse blue
+note right of Coord1
+  Pairing window open for 60s
+  ESP-NOW accepts new peers
+  Visual feedback: LED pulsing
+end note
+Coord1 -> MQTT: Publish\nsite/{siteId}/coord/1/status\n{"pairing": "active"}
+deactivate Coord1
+
+MQTT -> Backend: Status update
+Backend -> Frontend: WebSocket\n{"coordId": "1", "pairing": "active"}
+Frontend -> Frontend: Show countdown timer\n"Pairing active: 60s"
+Frontend -> User: Visual indication\nBlue pulsing icon
+
+== Node Powers On and Initiates Pairing ==
+
+User -> Node: Power on new node\n(or press reset)
+activate Node
+Node -> Node: Boot sequence\n- Initialize hardware\n- ESP-NOW init\n- Search for coordinator
+Node -> Coord1: ESP-NOW\nPairing Request\n(broadcast)
+deactivate Node
+
+== Coordinator Accepts Node ==
+
+activate Coord1
+Coord1 -> Coord1: Validate pairing window\n(still open)
+Coord1 -> Coord1: NodeRegistry\naddNode(MAC)\nStore in NVS
+Coord1 -> Coord1: EspNowManager\naddPeer(MAC)
+Coord1 -> Coord1: Assign Node ID\n"1.6" (next available)
+Coord1 -> Coord1: Flash LED strip\nGroup of 4 pixels\n(visual feedback)
+note right of Coord1
+  Node stored in NVS:
+  • MAC address
+  • Assigned Node ID
+  • Pairing timestamp
+  • Initial metadata
+end note
+Coord1 -> Node: ESP-NOW\nPairing Ack\n{\n  "nodeId": "1.6",\n  "coordId": "1"\n}
+
+Coord1 -> MQTT: Publish\nsite/{siteId}/coord/1/status\n{\n  "event": "nodePaired",\n  "nodeId": "1.6",\n  "mac": "AA:BB:CC:DD:EE:FF"\n}
+deactivate Coord1
+
+== Node Confirms Pairing ==
+
+Node -> Node: Store coordinator info\nin NVS
+Node -> Node: Flash onboard LED\n(confirmation)
+Node -> Coord1: ESP-NOW\nFirst telemetry\nNodeStatus frame
+
+== Backend Records New Node ==
+
+MQTT -> Backend: New node event
+activate Backend
+Backend -> DB: Insert new node\n{\n  "nodeId": "1.6",\n  "coordId": "1",\n  "mac": "AA:BB:CC:DD:EE:FF",\n  "paired_at": timestamp,\n  "status": "online"\n}
+note right of DB
+  Node document created:
+  • Linked to Coordinator 1
+  • Initial telemetry
+  • Default settings
+end note
+Backend -> Frontend: WebSocket update\n{\n  "event": "nodeAdded",\n  "nodeId": "1.6",\n  "coordId": "1"\n}
+deactivate Backend
+
+Frontend -> Frontend: Add node to UI\n- Update coordinator card\n- Show new node in list
+Frontend -> User: Notification\n"✓ Node 1.6 paired to Coordinator 1"
+
+== Pairing Window Closes ==
+
+note over Coord1
+  After 60 seconds or manual close
+end note
+
+Coord1 -> Coord1: NodeRegistry\nstopPairing()
+Coord1 -> Coord1: Status LED\nsolid (normal mode)
+Coord1 -> MQTT: Publish\nsite/{siteId}/coord/1/status\n{"pairing": "closed"}
+
+MQTT -> Backend: Status update
+Backend -> Frontend: WebSocket
+Frontend -> Frontend: Hide countdown timer
+Frontend -> User: "Pairing window closed"
+
+@enduml

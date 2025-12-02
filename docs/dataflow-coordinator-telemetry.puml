@@ -1,0 +1,65 @@
+@startuml Coordinator Telemetry Flow
+
+!theme plain
+skinparam sequenceMessageAlign center
+skinparam backgroundColor #FEFEFE
+
+title Coordinator Telemetry Flow (All Coordinators)
+
+participant "ESP32-S3\nCoordinator 1" as Coord1
+participant "ESP32-S3\nCoordinator 2" as Coord2
+participant "ESP32-S3\nCoordinator M" as CoordM
+participant "Mosquitto\nMQTT Broker" as MQTT
+participant "Go Backend\nREST API" as Backend
+participant "MongoDB" as DB
+participant "Angular\nFrontend" as Frontend
+
+note over Coord1, CoordM
+  All M coordinators publish their sensor data independently
+  Each coordinator has: Light sensor, Temp sensor, mmWave radar
+end note
+
+== Coordinator 1 Publishes Telemetry ==
+
+Coord1 -> Coord1: Read local sensors\n- Ambient Light (ADC)\n- TSL2561 Light\n- LD2450 mmWave\n- WiFi RSSI
+Coord1 -> MQTT: Publish\nsite/{siteId}/coord/1/telemetry\n{\n  "coordId": "1",\n  "light": 450,\n  "temperature": 22.5,\n  "mmWave": {"present": true}\n}
+
+Coord1 -> MQTT: Publish\nsite/{siteId}/coord/1/mmwave\n(mmWave detailed data)
+
+Coord1 -> MQTT: Publish\nsite/{siteId}/coord/1/status\n{\n  "wifi": "connected",\n  "mqtt": "connected",\n  "nodes": 5\n}
+
+== Coordinator 2 Publishes Telemetry ==
+
+Coord2 -> Coord2: Read local sensors
+Coord2 -> MQTT: Publish\nsite/{siteId}/coord/2/telemetry
+
+== Coordinator M Publishes Telemetry ==
+
+CoordM -> CoordM: Read local sensors\n- Light, Temp, mmWave
+CoordM -> MQTT: Publish\nsite/{siteId}/coord/M/telemetry
+
+== Backend Aggregates All Coordinator Data ==
+
+MQTT -> Backend: MQTT messages\n(from all M coordinators)
+activate Backend
+Backend -> DB: Store coordinator data\n(all M coordinators)
+note right of DB
+  Collections:
+  - coordinators (status)
+  - telemetry_history
+  - mmwave_events
+end note
+Backend -> Frontend: WebSocket push\n(aggregated data)
+deactivate Backend
+
+Frontend -> Frontend: Update coordinator views\n- Coordinator status cards\n- Light/Temp charts\n- mmWave presence indicators\n- Network topology map
+
+note right of Frontend
+  Shows all M coordinators:
+  • Online/Offline status
+  • Sensor readings
+  • Connected nodes count
+  • WiFi signal strength
+end note
+
+@enduml
