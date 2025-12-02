@@ -4,7 +4,7 @@ skinparam componentStyle rectangle
 skinparam backgroundColor #FEFEFE
 skinparam linetype ortho
 skinparam nodesep 60
-skinparam ranksep 60
+skinparam ranksep 100
 
 skinparam component {
     BackgroundColor<<coordinator>> #FFE4B5
@@ -31,6 +31,10 @@ package "Infrastructure" <<infrastructure>> {
     component [Mosquitto Broker\n---\nPort: 1883\nCredentials: user1/user1] as Mosquitto
     database [MongoDB\n---\nPort: 27017\nDatabase: iot_smarttile] as MongoDB
 }
+
+' Add spacing
+Mosquitto -[hidden]down- Coord1
+MongoDB -[hidden]down- CoordN
 
 ' Hardware Layer - Zone 1 (Coordinator 1)
 package "Zone 1" {
@@ -157,7 +161,7 @@ note bottom of MongoDB
 end note
 
 ' Legend
-legend bottom left
+legend top left
   |= Color |= Component Type |
   | <<coordinator>> | ESP32-S3 Coordinators (2 zones) |
   | <<node>> | ESP32-C3 Nodes (N per zone) |
