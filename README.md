@@ -1,5 +1,16 @@
 # IOT Smart Tile System - Node Coordinator
 
+[![ESP32](https://img.shields.io/badge/ESP32-S3%20%7C%20C3-E7352C?style=flat&logo=espressif&logoColor=white)](https://www.espressif.com/)
+[![Platform](https://img.shields.io/badge/Platform-Arduino-00979D?style=flat&logo=arduino&logoColor=white)](https://www.arduino.cc/)
+[![PlatformIO](https://img.shields.io/badge/PlatformIO-Framework-FF7F00?style=flat&logo=platformio&logoColor=white)](https://platformio.org/)
+[![Go](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go&logoColor=white)](https://golang.org/)
+[![Angular](https://img.shields.io/badge/Angular-15+-DD0031?style=flat&logo=angular&logoColor=white)](https://angular.io/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-3178C6?style=flat&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![MQTT](https://img.shields.io/badge/MQTT-Mosquitto-3C5280?style=flat&logo=eclipsemosquitto&logoColor=white)](https://mosquitto.org/)
+[![MongoDB](https://img.shields.io/badge/MongoDB-7.0-47A248?style=flat&logo=mongodb&logoColor=white)](https://www.mongodb.com/)
+[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?style=flat&logo=docker&logoColor=white)](https://www.docker.com/)
+[![License](https://img.shields.io/badge/License-MIT-yellow?style=flat)](LICENSE)
+
 ## Project Report
 
 **Project Type:** Embedded IoT System  
@@ -7,7 +18,14 @@
 **Platform:** ESP32 (S3 Coordinator, C3 Nodes)  
 **Technologies:** ESP-NOW, MQTT, Go, Angular, Docker
 
-**Tags:** `IoT` `ESP32` `ESP32-S3` `ESP32-C3` `ESP-NOW` `MQTT` `Embedded-Systems` `Real-Time` `Mesh-Networking` `Smart-Lighting` `RGBW-LED` `Temperature-Sensor` `mmWave-Radar` `Presence-Detection` `Arduino` `PlatformIO` `Go` `Golang` `Angular` `TypeScript` `WebSocket` `REST-API` `MongoDB` `Docker` `Docker-Compose` `Mosquitto` `Home-Automation` `Wireless-Sensor-Network` `ESP-NOW-Protocol` `NeoPixel` `TMP117` `TSL2561` `LD2450` `NVS` `OTA-Updates` `Zone-Control` `Battery-Monitoring` `Deep-Sleep` `Low-Power` `Time-Series` `PlantUML`
+**Technologies & Features:**
+- 🔌 **Hardware:** `ESP32-S3` `ESP32-C3` `ESP-NOW Protocol` `RGBW LED` `TMP117` `TSL2561` `LD2450 mmWave`
+- 🌐 **Networking:** `MQTT` `WebSocket` `REST API` `Mesh Networking` `Wireless Sensor Network`
+- 💻 **Backend:** `Go` `MongoDB` `Docker` `Time-Series Database`
+- 🎨 **Frontend:** `Angular` `TypeScript` `Real-Time Dashboard` `Data Visualization`
+- ⚡ **Features:** `Smart Lighting` `Zone Control` `Presence Detection` `Temperature Monitoring` `Battery Monitoring` `OTA Updates` `Deep Sleep` `Low Power`
+- 🏠 **Application:** `Home Automation` `IoT` `Embedded Systems`
+- 📐 **Tools:** `PlatformIO` `Arduino` `PlantUML` `NVS Storage`
 
 An intelligent IoT lighting system utilizing ESP-NOW for mesh networking between ESP32 nodes and a coordinator, with real-time monitoring, MQTT integration, and web-based control interface.
 
