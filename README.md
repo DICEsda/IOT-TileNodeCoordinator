@@ -76,7 +76,7 @@ The IOT Smart Tile System is a distributed embedded IoT platform designed for in
 
 ## System Architecture
 
-See PlantUML diagrams in `docs/` directory:
+See PlantUML diagrams in `Diagrams/diagrams/` directory:
 
 **System Architecture:**
 - `architecture.puml` - Component architecture (2 zones: Zone 1 and Zone N, each with N nodes, MQTT topics, database schema)
