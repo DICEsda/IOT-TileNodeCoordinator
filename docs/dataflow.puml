@@ -1,0 +1,104 @@
+@startuml IOT Smart Tile Data Flow
+
+!theme plain
+skinparam sequenceMessageAlign center
+skinparam backgroundColor #FEFEFE
+
+actor User
+participant "Angular\nFrontend" as Frontend
+participant "Go Backend\nREST API" as Backend
+participant "MongoDB" as DB
+participant "Mosquitto\nMQTT Broker" as MQTT
+participant "ESP32-S3\nCoordinator" as Coord
+participant "ESP32-C3\nNode" as Node
+
+== Telemetry Uplink Flow ==
+
+Node -> Node: Read sensors\n(RGBW, Temp, Button,\nBattery, RSSI)
+Node -> Coord: ESP-NOW Message\nNodeStatus frame
+activate Coord
+Coord -> Coord: NodeRegistry\nupdate cache
+Coord -> Coord: Update LED strip\n(visual feedback)
+Coord -> MQTT: Publish\nsite/{siteId}/node/{nodeId}/telemetry
+deactivate Coord
+
+MQTT -> Backend: MQTT message
+activate Backend
+Backend -> DB: Store telemetry\n(timestamp, values)
+Backend -> Frontend: WebSocket push\n(real-time update)
+deactivate Backend
+
+Frontend -> Frontend: Update dashboard\n(charts, node status)
+
+== Coordinator Telemetry Flow ==
+
+Coord -> Coord: Read sensors\n(Light, Temp, mmWave)
+Coord -> MQTT: Publish\nsite/{siteId}/coord/{coordId}/telemetry
+MQTT -> Backend: MQTT message
+activate Backend
+Backend -> DB: Store coordinator data
+Backend -> Frontend: WebSocket push
+deactivate Backend
+Frontend -> Frontend: Update coordinator view
+
+== Command Downlink Flow ==
+
+User -> Frontend: Set LED command\n(Zone control)
+Frontend -> Backend: HTTP POST\n/api/sites/{siteId}/zones/{zoneId}/cmd
+activate Backend
+Backend -> DB: Log command
+Backend -> MQTT: Publish\nsite/{siteId}/coord/{coordId}/cmd
+deactivate Backend
+
+MQTT -> Coord: MQTT message\n{"cmd":"setLed",...}
+activate Coord
+Coord -> Coord: Parse command\n(MqttManager)
+Coord -> Node: ESP-NOW\nLightingCommand
+deactivate Coord
+
+Node -> Node: Set RGBW LEDs\n(PWM channels)
+Node -> Coord: ESP-NOW Ack\nNodeStatus update
+Coord -> MQTT: Publish updated status
+MQTT -> Backend: Confirmation
+Backend -> Frontend: WebSocket notification
+Frontend -> User: Visual confirmation
+
+== Pairing Flow ==
+
+User -> Frontend: Trigger pairing\n(60 seconds)
+Frontend -> Backend: POST /api/pairing
+Backend -> MQTT: Publish\nsite/{siteId}/coord/{coordId}/cmd\n{"cmd":"pair","duration_ms":60000}
+MQTT -> Coord: Pairing command
+
+activate Coord
+Coord -> Coord: NodeRegistry\nstartPairing()
+Coord -> Coord: EspNow\nenablePairingMode()
+Coord -> Coord: Status LED\npulse blue
+deactivate Coord
+
+Node -> Node: Power on/reset
+Node -> Coord: ESP-NOW\npairing request
+activate Coord
+Coord -> Coord: Add to NodeRegistry\n(NVS storage)
+Coord -> Coord: Flash LED strip\n(visual feedback)
+Coord -> MQTT: Publish\nNew node paired
+deactivate Coord
+
+MQTT -> Backend: New node event
+Backend -> DB: Store node info
+Backend -> Frontend: WebSocket update
+Frontend -> User: "Node paired successfully"
+
+== Historical Data Query ==
+
+User -> Frontend: View history\n(last 24h)
+Frontend -> Backend: GET /api/sites/{siteId}/telemetry?\nstart=...&end=...
+activate Backend
+Backend -> DB: Query telemetry\n(time range)
+DB -> Backend: Return results
+Backend -> Frontend: JSON response\n(time series data)
+deactivate Backend
+Frontend -> Frontend: Render charts\n(Highcharts/D3)
+Frontend -> User: Display graphs
+
+@enduml

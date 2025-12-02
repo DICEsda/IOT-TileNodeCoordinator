@@ -56,40 +56,9 @@ The IOT Smart Tile System is a distributed embedded IoT platform designed for in
 
 ## System Architecture
 
-```
-┌─────────────────┐     ESP-NOW      ┌──────────────────┐      MQTT       ┌─────────────┐
-│   ESP32-C3      │ ←─────────────→  │   ESP32-S3       │ ←──────────────→ │ Mosquitto   │
-│   Node 1        │                  │   Coordinator    │                 │   Broker    │
-└─────────────────┘                  └──────────────────┘                 └─────────────┘
-┌─────────────────┐     ESP-NOW           │                                     │
-│   ESP32-C3      │ ←─────────────────────┘                                     │
-│   Node 2        │                                                              │
-└─────────────────┘                                                              ▼
-┌─────────────────┐                                                      ┌─────────────┐
-│   ESP32-C3      │                                                      │ Go Backend  │
-│   Node N        │                                                      │   (API)     │
-└─────────────────┘                                                      └─────────────┘
-                                                                                 │
-    ┌────────────────────────────────────────────────────────────────────────────┤
-    │                                                                            │
-    ▼                                                                            ▼
-┌─────────────┐                                                          ┌─────────────┐
-│  MongoDB    │                                                          │  Angular    │
-│  Database   │                                                          │  Frontend   │
-└─────────────┘                                                          └─────────────┘
-```
-
-### Data Flow
-
-**Telemetry Path (Uplink)**:
-```
-Node Sensors → ESP-NOW → Coordinator → MQTT (site/{siteId}/node/{nodeId}/telemetry) → Backend → WebSocket → Frontend
-```
-
-**Command Path (Downlink)**:
-```
-Frontend → REST API → Backend → MQTT (site/{siteId}/coord/{coordId}/cmd) → Coordinator → ESP-NOW → Node
-```
+See PlantUML diagrams in `docs/` directory:
+- `architecture.puml` - System component architecture and MQTT topics
+- `dataflow.puml` - Detailed sequence diagrams for telemetry, commands, and pairing
 
 ## Hardware
 
@@ -436,83 +405,6 @@ STATUS: wifi=connected, mqtt=connected, pairing=closed, nodes=3
 FETCHED NODE [AA:BB:CC:DD:EE:FF] DATA: temp=23.2, rgbw=[255,128,64,200], rssi=-72
 ```
 
-## Development
-
-### Building the Coordinator
-
-```bash
-cd coordinator
-
-# Build only
-pio run -e esp32-s3-devkitc-1
-
-# Upload and monitor
-pio run -e esp32-s3-devkitc-1 -t upload -t monitor
-
-# Clean build
-pio run -t clean
-```
-
-### Building Nodes
-
-```bash
-cd node
-
-# Normal build
-pio run -e esp32-c3-mini-1 -t upload
-
-# Debug build with verbose logging
-pio run -e esp32-c3-mini-1-debug -t upload -t monitor
-
-# OTA-enabled build
-pio run -e esp32-c3-mini-1-ota -t upload
-
-# Standalone test (without shared library)
-pio run -e esp32-c3-mini-1-standalone -t upload
-```
-
-### Shared Library Updates
-
-When modifying `shared/` code:
-
-1. Update both `coordinator/` and `node/` as needed
-2. Keep message structures synchronized (`Messages.h`)
-3. Test on both platforms
-4. Update documentation
-
-### Backend Development
-
-```bash
-cd IOT-Backend-main/IOT-Backend-main
-
-# Run with hot reload (install air: go install github.com/cosmtrek/air@latest)
-air
-
-# Run tests
-go test ./...
-
-# Build binary
-go build -o bin/iot-backend cmd/iot/main.go
-```
-
-### Frontend Development
-
-```bash
-cd IOT-Frontend-main/IOT-Frontend-main
-
-# Serve with hot reload
-npm start
-
-# Build for production
-npm run build
-
-# Run tests
-npm test
-
-# Lint
-npm run lint
-```
-
 ## Pin Configuration
 
 ### Coordinator (ESP32-S3)
@@ -554,103 +446,6 @@ npm run lint
 // Battery Monitor
 #define BATTERY_ADC 0               // ADC1_CH0
 ```
-
-## Troubleshooting
-
-### Coordinator Issues
-
-**WiFi Not Connecting**:
-- Check serial console for interactive provisioning prompts
-- Verify SSID and password
-- Ensure 2.4 GHz WiFi (5 GHz not supported)
-- Check router firewall settings
-
-**MQTT Connection Fails**:
-- Verify broker address in `ConfigManager` ("mqtt" namespace)
-- Check credentials (username: user1, password: user1)
-- Test broker with `mosquitto_sub`: `mosquitto_sub -h localhost -p 1883 -u user1 -P user1 -t '#'`
-
-**NVS Errors**:
-- Erase and re-initialize: See `docs/development/COMPLETE_NVS_FIX.md`
-- Flash size mismatch: Verify partition table
-
-### Node Issues
-
-**Node Not Pairing**:
-- Ensure coordinator is in pairing mode (blue LED pulse)
-- Power cycle the node
-- Check ESP-NOW channel (must match coordinator, typically channel 1)
-- Verify MAC address format
-
-**Node Not Sending Data**:
-- Check serial output for ESP-NOW send errors
-- Verify coordinator is receiving (check coordinator serial)
-- Check distance (ESP-NOW range ~100m line-of-sight)
-
-**Deep Sleep Issues**:
-- Disable deep sleep for debugging: Remove `-DENABLE_DEEP_SLEEP` from `platformio.ini`
-- Check wake-up GPIO configuration
-
-### Backend Issues
-
-**MongoDB Connection Error**:
-```bash
-# Check MongoDB is running
-docker ps | grep mongodb
-
-# Restart MongoDB
-docker-compose restart mongodb
-```
-
-**MQTT Messages Not Received**:
-```bash
-# Test MQTT subscription
-mosquitto_sub -h localhost -p 1883 -u user1 -P user1 -t 'site/#' -v
-
-# Check backend logs
-docker-compose logs -f backend
-```
-
-### Frontend Issues
-
-**WebSocket Connection Failed**:
-- Verify backend is running: `curl http://localhost:8000/health`
-- Check WebSocket URL in environment config
-- Inspect browser console for errors
-
-## Best Practices
-
-### Coordinator Development
-- Never double-call `Logger::begin` (use `Logger::setMinLevel` for verbosity)
-- Follow `*Manager` convention for subsystems
-- Always call `wifi->loop()` before MQTT operations
-- Keep ESP-NOW configuration inside `EspNowManager`
-- Use `ConfigManager` namespaces for persistent storage
-
-### Node Development
-- Minimize wake time for battery life
-- Use ESP-NOW only (no WiFi STA mode)
-- Implement exponential backoff for retries
-- Log critical events before deep sleep
-
-### Backend Development
-- Keep MQTT topics additive (add optional fields, don't break existing)
-- Handle disconnections gracefully
-- Use structured logging
-- Validate all inputs
-
-### Frontend Development
-- Handle real-time data efficiently (debounce updates)
-- Show connection status prominently
-- Provide offline fallbacks
-- Cache historical data
-
-## Documentation
-
-- **Architecture**: See `docs/development/` for detailed subsystem documentation
-- **MQTT API**: `docs/mqtt_api.md` and `docs/development/MQTT_TOPIC_ALIGNMENT_COMPLETE.md`
-- **NVS Guide**: `docs/development/COMPLETE_NVS_FIX.md`
-- **Hardware**: See `Datasheet/` for component datasheets
 
 ## Dependencies
 
