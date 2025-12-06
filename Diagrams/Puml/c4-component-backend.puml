@@ -1,0 +1,40 @@
+@startuml C4 Component Diagram - Go Backend
+
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+LAYOUT_WITH_LEGEND()
+LAYOUT_TOP_DOWN()
+
+title Component Diagram - Go Backend
+
+Container_Boundary(backend, "Go Backend") {
+    
+    Component(restApi, "REST API", "Gin/Echo", "Exposes HTTP endpoints for sites, coordinators, nodes, telemetry, and zones")
+    
+    Component(websocket, "WebSocket Server", "Gorilla WebSocket", "Pushes real-time updates to connected frontend clients")
+    
+    Component(mqttClient, "MQTT Client", "Paho MQTT", "Subscribes to telemetry topics and publishes commands")
+    
+    Component(repository, "Repository Layer", "Go Interfaces", "Data access abstraction for MongoDB operations")
+    
+    Component(googleHomeHandler, "Google Home Handler", "HTTP Handlers", "Handles Google Assistant fulfillment requests")
+    
+    Component(fxModule, "Uber fx DI", "Dependency Injection", "Manages component lifecycle and wiring")
+}
+
+Container(frontend, "Angular Frontend", "Angular", "Web dashboard")
+ContainerDb(database, "MongoDB", "MongoDB 7.0", "Data storage")
+Container(broker, "MQTT Broker", "Mosquitto", "Message broker")
+System_Ext(googleHome, "Google Home", "Voice assistant")
+
+Rel(frontend, restApi, "HTTP requests", "JSON")
+Rel(frontend, websocket, "Real-time updates", "WebSocket")
+Rel(restApi, repository, "Uses")
+Rel(websocket, repository, "Uses")
+Rel(mqttClient, broker, "Pub/Sub", "MQTT")
+Rel(mqttClient, repository, "Stores telemetry")
+Rel(repository, database, "CRUD", "MongoDB Driver")
+Rel(googleHome, googleHomeHandler, "Fulfillment", "HTTPS")
+Rel(googleHomeHandler, repository, "Uses")
+
+@enduml

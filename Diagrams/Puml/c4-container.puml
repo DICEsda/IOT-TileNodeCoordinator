@@ -1,0 +1,37 @@
+@startuml C4 Container Diagram - IOT Smart Tile System
+
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+LAYOUT_WITH_LEGEND()
+LAYOUT_TOP_DOWN()
+
+title Container Diagram - IOT Smart Tile System
+
+Person(user, "User", "Controls and monitors lighting")
+
+System_Boundary(smartTile, "IOT Smart Tile System") {
+    
+    Container(frontend, "Angular Frontend", "Angular 15+, TypeScript", "Web dashboard for real-time monitoring, zone control, and node management")
+    
+    Container(backend, "Go Backend", "Go 1.21+, Uber fx", "Relays MQTT telemetry to MongoDB and serves data via REST/WebSocket")
+    
+    Container(broker, "MQTT Broker", "Eclipse Mosquitto 2.0", "Message broker for pub/sub communication between coordinators and backend")
+    
+    ContainerDb(database, "MongoDB", "MongoDB 7.0", "Stores sites, coordinators, nodes, telemetry history, and zones")
+    
+    Container(coordinator, "ESP32-S3 Coordinator", "C++, PlatformIO", "Gateway that bridges ESP-NOW mesh to MQTT cloud")
+    
+    Container(node, "ESP32-C3 Node", "C++, PlatformIO", "Battery-powered tile with RGBW LEDs, temperature sensor, and button")
+}
+
+System_Ext(googleHome, "Google Home", "Voice control")
+
+Rel(user, frontend, "Uses", "HTTPS")
+Rel(frontend, backend, "Queries data, sends commands", "REST/WebSocket")
+Rel(backend, broker, "Subscribes and publishes", "MQTT")
+Rel(backend, database, "Reads and writes", "MongoDB Protocol")
+Rel(coordinator, broker, "Publishes telemetry, receives commands", "MQTT over WiFi")
+Rel(node, coordinator, "Sends status, receives LED commands", "ESP-NOW")
+Rel(backend, googleHome, "Integrates with", "Google Home API")
+
+@enduml

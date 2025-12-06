@@ -1,0 +1,52 @@
+@startuml C4 Component Diagram - ESP32-S3 Coordinator
+
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+LAYOUT_WITH_LEGEND()
+LAYOUT_TOP_DOWN()
+
+title Component Diagram - ESP32-S3 Coordinator
+
+Container_Boundary(coordinator, "ESP32-S3 Coordinator") {
+    
+    Component(core, "Coordinator Core", "C++ Class", "Main orchestrator with 1ms loop tick")
+    
+    Component(espNow, "EspNow Manager", "ESP-NOW API", "Handles mesh communication with nodes, pairing, and peer management")
+    
+    Component(mqtt, "MQTT Manager", "PubSubClient", "Publishes telemetry and subscribes to command topics")
+    
+    Component(wifi, "WiFi Manager", "ESP WiFi API", "Handles WiFi provisioning, reconnection, and STA mode")
+    
+    Component(nodeRegistry, "Node Registry", "NVS Storage", "Tracks paired nodes, stores MACs in flash")
+    
+    Component(zoneControl, "Zone Control", "LED Mapping", "Maps nodes to zones, handles scene control")
+    
+    Component(mmWave, "mmWave Sensor", "UART Parser", "Parses LD2450 radar frames for presence detection")
+    
+    Component(ambientLight, "Ambient Light", "ADC Reader", "Reads analog light level from GPIO36")
+    
+    Component(buttonControl, "Button Control", "Touch GPIO", "Handles pairing trigger via short/long press")
+    
+    Component(thermalControl, "Thermal Control", "Safety", "Monitors temperature and triggers protection")
+}
+
+Container(broker, "MQTT Broker", "Mosquitto", "Cloud broker")
+Container(node, "ESP32-C3 Node", "Node firmware", "Smart tile")
+
+Rel(core, espNow, "Initializes and polls")
+Rel(core, mqtt, "Initializes and polls")
+Rel(core, wifi, "Initializes and polls")
+Rel(core, nodeRegistry, "Queries and updates")
+Rel(core, zoneControl, "Controls")
+Rel(core, mmWave, "Reads frames")
+Rel(core, ambientLight, "Reads ADC")
+Rel(core, buttonControl, "Checks input")
+Rel(core, thermalControl, "Monitors")
+
+Rel(espNow, node, "ESP-NOW messages", "Encrypted")
+Rel(mqtt, broker, "MQTT over WiFi", "QoS 1")
+Rel(wifi, mqtt, "Provides connectivity")
+Rel(nodeRegistry, espNow, "Adds peers")
+Rel(buttonControl, nodeRegistry, "Triggers pairing")
+
+@enduml

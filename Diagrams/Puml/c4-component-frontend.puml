@@ -1,0 +1,45 @@
+@startuml C4 Component Diagram - Angular Frontend
+
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+LAYOUT_WITH_LEGEND()
+LAYOUT_TOP_DOWN()
+
+title Component Diagram - Angular Frontend
+
+Container_Boundary(frontend, "Angular Frontend") {
+    
+    Component(dashboard, "Dashboard Component", "Angular Component", "Main view with zone cards, telemetry, and controls")
+    
+    Component(zoneControl, "Zone Control Component", "Angular Component", "Manage zones, assign nodes, set scenes")
+    
+    Component(nodeManagement, "Node Management Component", "Angular Component", "View node status, rename, delete nodes")
+    
+    Component(mmWaveViz, "mmWave Visualization", "Angular Component", "Real-time presence detection display")
+    
+    Component(charts, "Charts & Graphs", "ng2-charts", "Historical temperature and light trends")
+    
+    Component(mqttService, "MQTT Service", "RxJS + WebSocket", "Real-time telemetry subscription via backend")
+    
+    Component(siteService, "Site Service", "HttpClient", "REST API calls for sites and coordinators")
+    
+    Component(nodeService, "Node Service", "HttpClient", "REST API calls for node operations")
+    
+    Component(telemetryService, "Telemetry Service", "HttpClient", "REST API calls for historical data")
+}
+
+Container(backend, "Go Backend", "Go", "API server")
+
+Rel(dashboard, mqttService, "Subscribes to updates")
+Rel(dashboard, siteService, "Fetches sites")
+Rel(zoneControl, siteService, "Manages zones")
+Rel(nodeManagement, nodeService, "CRUD operations")
+Rel(mmWaveViz, mqttService, "Real-time presence")
+Rel(charts, telemetryService, "Historical data")
+
+Rel(mqttService, backend, "WebSocket", "Real-time")
+Rel(siteService, backend, "HTTP", "REST")
+Rel(nodeService, backend, "HTTP", "REST")
+Rel(telemetryService, backend, "HTTP", "REST")
+
+@enduml

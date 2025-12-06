@@ -1,0 +1,21 @@
+@startuml C4 Context Diagram - IOT Smart Tile System
+
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+
+LAYOUT_WITH_LEGEND()
+LAYOUT_TOP_DOWN()
+
+title System Context Diagram - IOT Smart Tile System
+
+Person(user, "User", "Home owner or building manager who controls and monitors lighting")
+
+System(smartTile, "IOT Smart Tile System", "Intelligent lighting control system with environmental monitoring and presence detection")
+
+System_Ext(googleHome, "Google Home", "Voice assistant integration for hands-free control")
+System_Ext(wifi, "WiFi Network", "Local wireless network for connectivity")
+
+Rel(user, smartTile, "Monitors and controls lighting via", "Web Browser")
+Rel(smartTile, googleHome, "Integrates with", "Google Home API")
+Rel(smartTile, wifi, "Connects through", "802.11 b/g/n")
+
+@enduml

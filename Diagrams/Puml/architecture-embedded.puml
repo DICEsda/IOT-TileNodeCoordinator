@@ -1,0 +1,234 @@
+@startuml IOT Smart Tile System - Embedded Architecture
+
+skinparam componentStyle rectangle
+skinparam backgroundColor #FEFEFE
+skinparam linetype ortho
+skinparam nodesep 50
+skinparam ranksep 80
+
+skinparam component {
+    BackgroundColor<<coordinator>> #FFE4B5
+    BackgroundColor<<node>> #B0E0E6
+    BackgroundColor<<sensor>> #98FB98
+    BackgroundColor<<manager>> #DDA0DD
+    BackgroundColor<<external>> #D3D3D3
+}
+
+title Embedded Architecture\n(ESP32 Coordinators + Nodes)
+
+' External - Cloud (simplified)
+package "Cloud Layer (External)" <<external>> {
+    component [Mosquitto\nMQTT Broker\nPort 1883] as Mosquitto
+    
+    note left of Mosquitto
+      See architecture-fullstack.puml
+      for detailed fullstack diagram
+    end note
+}
+
+' ==================== ZONE 1 ====================
+package "Zone 1" {
+    
+    ' Coordinator 1 Detail
+    package "ESP32-S3 Coordinator 1" <<coordinator>> {
+        
+        component [Coordinator Core\n---\nEntry: main.cpp\nClass: Coordinator\nLoop: 1ms tick] as Coord1Core
+        
+        package "Managers" <<manager>> {
+            component [EspNow\n---\nChannel: 1\nAES-128 PMK\nPeer mgmt] as EspNow1
+            component [Mqtt\n---\nPaho Client\nQoS: 1\nReconnect] as Mqtt1
+            component [WifiManager\n---\nSTA mode\nProvisioning\nReconnect] as Wifi1
+            component [NodeRegistry\n---\nNVS storage\nPairing window\nMAC tracking] as NodeReg1
+            component [ZoneControl\n---\nLED mapping\nScene control\nBrightness] as Zone1
+            component [ThermalControl\n---\nOverheat protect\nFan control] as Thermal1
+            component [ButtonControl\n---\nTouch GPIO0\nShort/Long press\nPairing trigger] as Button1
+        }
+        
+        package "Sensors" <<sensor>> {
+            component [AmbientLightSensor\n---\nGPIO36 ADC\nAnalog divider\n0-4095 range] as ALS1
+            component [TSL2561\n---\nI2C: 0x39\nDigital lux\nSDA:21 SCL:22] as TSL1
+            component [MmWave LD2450\n---\n24GHz radar\nUART: RX16 TX17\n6m range\n3 targets] as MmWave1
+            component [NeoPixel Strip\n---\nSK6812B RGBW\nGPIO48 data\n4 pixels/node] as Neo1
+            component [Status LED\n---\nGPIO2\nSystem status] as Status1
+        }
+        
+        ' Internal connections
+        Coord1Core --> EspNow1
+        Coord1Core --> Mqtt1
+        Coord1Core --> Wifi1
+        Coord1Core --> NodeReg1
+        Coord1Core --> Zone1
+        Coord1Core --> Thermal1
+        Coord1Core --> Button1
+        Coord1Core --> ALS1
+        Coord1Core --> TSL1
+        Coord1Core --> MmWave1
+        Coord1Core --> Neo1
+        Coord1Core --> Status1
+        
+        Wifi1 -[hidden]right- EspNow1
+    }
+    
+    ' Nodes Zone 1
+    package "ESP32-C3 Nodes (Zone 1)" <<node>> {
+        
+        component [Node 1.1\n---\nMAC: AA:BB:CC:...\nPaired: ✓] as Node11
+        component [Node 1.2\n---\nMAC: AA:BB:DD:...\nPaired: ✓] as Node12
+        component [Node 1.N\n---\nMAC: AA:BB:EE:...\nPaired: ✓] as Node1N
+        
+        Node11 -[hidden]right- Node12
+        Node12 -[hidden]right- Node1N
+    }
+    
+    ' ESP-NOW connections Zone 1
+    Node11 -up-> EspNow1 : ESP-NOW\nNodeStatus
+    Node12 -up-> EspNow1 : ESP-NOW\nNodeStatus
+    Node1N -up-> EspNow1 : ESP-NOW\nNodeStatus
+    EspNow1 -down-> Node11 : ESP-NOW\nLED commands
+    EspNow1 -down-> Node12 : ESP-NOW\nLED commands
+    EspNow1 -down-> Node1N : ESP-NOW\nLED commands
+}
+
+' ==================== ZONE N ====================
+package "Zone N" {
+    
+    ' Coordinator N Detail
+    package "ESP32-S3 Coordinator N" <<coordinator>> {
+        
+        component [Coordinator Core\n---\nEntry: main.cpp\nClass: Coordinator\nLoop: 1ms tick] as CoordNCore
+        
+        package "Managers" <<manager>> {
+            component [EspNow\n---\nChannel: 1\nAES-128 PMK\nPeer mgmt] as EspNowN
+            component [Mqtt\n---\nPaho Client\nQoS: 1\nReconnect] as MqttN
+            component [WifiManager\n---\nSTA mode\nProvisioning\nReconnect] as WifiN
+            component [NodeRegistry\n---\nNVS storage\nPairing window\nMAC tracking] as NodeRegN
+        }
+        
+        package "Sensors" <<sensor>> {
+            component [Sensors\n---\nSame as Zone 1] as SensorsN
+        }
+        
+        CoordNCore --> EspNowN
+        CoordNCore --> MqttN
+        CoordNCore --> WifiN
+        CoordNCore --> NodeRegN
+        CoordNCore --> SensorsN
+    }
+    
+    ' Nodes Zone N
+    package "ESP32-C3 Nodes (Zone N)" <<node>> {
+        component [Node N.1] as NodeN1
+        component [Node N.2] as NodeN2
+        component [Node N.N] as NodeNN
+        
+        NodeN1 -[hidden]right- NodeN2
+        NodeN2 -[hidden]right- NodeNN
+    }
+    
+    ' ESP-NOW connections Zone N
+    NodeN1 -up-> EspNowN : ESP-NOW
+    NodeN2 -up-> EspNowN : ESP-NOW
+    NodeNN -up-> EspNowN : ESP-NOW
+}
+
+' WiFi/MQTT to Cloud
+Mqtt1 -up-> Mosquitto : MQTT/WiFi\nsite/{siteId}/coord/1/...\nsite/{siteId}/node/1.x/...
+MqttN -up-> Mosquitto : MQTT/WiFi\nsite/{siteId}/coord/N/...\nsite/{siteId}/node/N.x/...
+
+' ==================== NODE DETAIL ====================
+package "ESP32-C3 Node Detail" <<node>> {
+    
+    component [StandaloneNode\n---\nEntry: main.cpp\nState machine\nChannel scanning] as NodeCore
+    
+    package "Node Components" {
+        component [LedController\n---\nPWM channels 0-3\nRGBW control\nFade transitions\n---\nR:GPIO2 G:GPIO3\nB:GPIO4 W:GPIO5] as LedCtrl
+        
+        component [TMP117 Sensor\n---\nI2C: 0x48\n±0.1°C accuracy\n16-bit resolution\n---\nSDA:GPIO8 SCL:GPIO9] as TMP117
+        
+        component [ButtonInput\n---\nGPIO6\nDebounce: 50ms\nShort/Long press] as NodeBtn
+        
+        component [Battery Monitor\n---\nADC1_CH0\nVoltage divider\n3.0V - 4.2V range] as Battery
+        
+        component [ESP-NOW Client\n---\nChannel scan 1-13\nPairing handshake\nNodeStatus TX\nCommand RX] as NodeEspNow
+    }
+    
+    NodeCore --> LedCtrl
+    NodeCore --> TMP117
+    NodeCore --> NodeBtn
+    NodeCore --> Battery
+    NodeCore --> NodeEspNow
+}
+
+' Notes
+note right of Coord1Core
+  **Coordinator Initialization:**
+  1. Logger::begin (single init)
+  2. NVS init (erase-on-error)
+  3. ESP-NOW begin (before WiFi)
+  4. WiFi provisioning
+  5. MQTT connect
+  6. Register callbacks
+  7. Enter loop()
+end note
+
+note bottom of Node11
+  **Node State Machine:**
+  
+  PAIRING → OPERATIONAL → UPDATE → REBOOT
+  
+  **Telemetry Payload:**
+  {
+    "nodeId": "1.1",
+    "rgbw": {r,g,b,w},
+    "temperature": 23.2,
+    "buttonPressed": false,
+    "batteryVoltage": 3.7,
+    "rssi": -65
+  }
+end note
+
+note right of MmWave1
+  **mmWave LD2450:**
+  • 24GHz FMCW radar
+  • 6m detection range
+  • ±60° horizontal FOV
+  • Up to 3 simultaneous targets
+  • X,Y coordinates + speed
+  • UART @ 256000 baud
+end note
+
+note bottom of LedCtrl
+  **LED Control:**
+  • 4x PWM @ 5kHz, 8-bit
+  • Per-channel brightness
+  • Smooth fade transitions
+  • Color temperature presets
+  • Energy-efficient modes
+end note
+
+' Legend
+legend top left
+  |= Color |= Component Type |
+  | <<coordinator>> | ESP32-S3 Coordinator |
+  | <<node>> | ESP32-C3 Node |
+  | <<sensor>> | Sensors & Actuators |
+  | <<manager>> | Software Managers |
+  | <<external>> | Cloud Services |
+  
+  **Hardware Specs:**
+  
+  Coordinator (ESP32-S3-DevKitC-1):
+  • Dual-core 240MHz, 8MB flash, 512KB SRAM
+  • WiFi 802.11 b/g/n + ESP-NOW
+  
+  Node (ESP32-C3-MINI-1):
+  • RISC-V 160MHz, 4MB flash, 400KB SRAM
+  • ESP-NOW only (no WiFi AP)
+  • Battery-powered, deep sleep
+  
+  **Communication:**
+  • ESP-NOW: <10ms latency, 220m range
+  • MQTT: QoS 1, persistent sessions
+endlegend
+
+@enduml

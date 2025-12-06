@@ -1,0 +1,38 @@
+@startuml C4 Component Diagram - ESP32-C3 Node
+
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+LAYOUT_WITH_LEGEND()
+LAYOUT_TOP_DOWN()
+
+title Component Diagram - ESP32-C3 Node
+
+Container_Boundary(node, "ESP32-C3 Node") {
+    
+    Component(core, "StandaloneNode", "C++ Class", "State machine: PAIRING → OPERATIONAL → UPDATE → REBOOT")
+    
+    Component(espNowClient, "ESP-NOW Client", "ESP-NOW API", "Channel scanning, pairing handshake, message TX/RX")
+    
+    Component(ledController, "LED Controller", "PWM Driver", "4-channel RGBW control with fade transitions")
+    
+    Component(tmp117, "TMP117 Sensor", "I2C Driver", "High-accuracy temperature sensing (±0.1°C)")
+    
+    Component(buttonInput, "Button Input", "GPIO + Debounce", "User input with short/long press detection")
+    
+    Component(batteryMonitor, "Battery Monitor", "ADC Reader", "Voltage monitoring for power management")
+    
+    Component(powerManager, "Power Manager", "Deep Sleep", "Optimizes battery life with sleep modes")
+}
+
+Container(coordinator, "ESP32-S3 Coordinator", "Gateway", "Mesh coordinator")
+
+Rel(core, espNowClient, "Sends NodeStatus, receives commands")
+Rel(core, ledController, "Sets RGBW values")
+Rel(core, tmp117, "Reads temperature")
+Rel(core, buttonInput, "Checks press events")
+Rel(core, batteryMonitor, "Reads voltage")
+Rel(core, powerManager, "Enters sleep")
+
+Rel(espNowClient, coordinator, "ESP-NOW", "<10ms latency")
+
+@enduml

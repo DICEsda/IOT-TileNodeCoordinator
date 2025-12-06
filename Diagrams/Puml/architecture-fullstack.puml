@@ -1,0 +1,167 @@
+@startuml IOT Smart Tile System - Fullstack Architecture
+
+skinparam componentStyle rectangle
+skinparam backgroundColor #FEFEFE
+skinparam linetype ortho
+skinparam nodesep 80
+skinparam ranksep 100
+skinparam padding 10
+skinparam defaultFontSize 14
+skinparam titleFontSize 24
+skinparam component {
+    FontSize 13
+    Padding 15
+}
+
+skinparam component {
+    BackgroundColor<<backend>> #90EE90
+    BackgroundColor<<frontend>> #FFB6C1
+    BackgroundColor<<infrastructure>> #E6E6FA
+    BackgroundColor<<external>> #D3D3D3
+}
+
+title Fullstack Architecture\n(Backend + Frontend + Infrastructure)
+
+' Frontend Layer (Top)
+package "Angular Frontend" <<frontend>> {
+    component [Web Dashboard\n---\nPort 4200\nAngular 15+\nTypeScript\nRxJS Observables] as Frontend
+    
+    component [Services\n---\n• MqttService\n• SiteService\n• NodeService\n• TelemetryService] as FrontendServices
+    
+    component [Components\n---\n• Dashboard\n• Zone Control\n• Node Management\n• mmWave Visualization\n• Charts & Graphs] as FrontendComponents
+    
+    FrontendServices -up-> FrontendComponents
+}
+
+' Backend Layer
+package "Go Backend API" <<backend>> {
+    component [REST API\n---\nGin/Echo Framework\nPort 8000\n---\nEndpoints:\n• GET /api/sites\n• GET /api/coordinators\n• GET /api/nodes\n• GET /api/telemetry\n• GET /health] as RestAPI
+    
+    component [WebSocket Server\n---\n/ws endpoint\nReal-time push\nJSON messages] as WebSocket
+    
+    component [MQTT Client\n---\nPaho MQTT\nSubscribe: site/#\nPublish: Commands\nQoS: 1] as MqttClient
+    
+    component [Repository Layer\n---\n• NodeRepository\n• TelemetryRepository\n• SiteRepository\n• ZoneRepository] as Repository
+    
+    component [Uber fx DI\n---\nDependency Injection\nModule composition\nLifecycle management] as FxDI
+    
+    FxDI --> RestAPI
+    FxDI --> WebSocket
+    FxDI --> MqttClient
+    FxDI --> Repository
+}
+
+' Infrastructure Layer
+package "Infrastructure" <<infrastructure>> {
+    component [Eclipse Mosquitto\n---\nMQTT Broker\nPort: 1883\nWebSocket: 9001\nCredentials: user1/user1\nPersistence: enabled] as Mosquitto
+    
+    database [MongoDB 7.0\n---\nPort: 27017\nDatabase: iot_smarttile\nReplica Set: optional\nSharding: optional] as MongoDB
+    
+    component [Docker Compose\n---\nContainer orchestration\n• mosquitto\n• mongodb\n• backend\n• frontend] as Docker
+}
+
+' External - Embedded devices (simplified)
+package "Embedded Layer (External)" <<external>> {
+    component [Coordinator 1\nESP32-S3] as Coord1
+    component [Coordinator N\nESP32-S3] as CoordN
+    
+    note right of Coord1
+      See architecture-embedded.puml
+      for detailed embedded diagram
+    end note
+}
+
+' Connections: Frontend to Backend
+Frontend -down-> RestAPI : HTTP REST\nGET/POST/PUT/DELETE
+Frontend <-down-> WebSocket : WebSocket\nReal-time updates
+
+' Connections: Backend to Infrastructure
+MqttClient <-down-> Mosquitto : MQTT Protocol\nPublish/Subscribe
+Repository -down-> MongoDB : MongoDB Driver\nCRUD operations
+
+' Connections: Infrastructure to Embedded
+Coord1 -up-> Mosquitto : MQTT over WiFi\nPublish telemetry
+CoordN -up-> Mosquitto : MQTT over WiFi\nPublish telemetry
+Mosquitto -down-> Coord1 : MQTT Commands\n.../cmd topics
+Mosquitto -down-> CoordN : MQTT Commands\n.../cmd topics
+
+' Notes
+note top of Frontend
+  **Frontend Features:**
+  • Real-time telemetry dashboard
+  • Zone and node management
+  • mmWave presence visualization
+  • Historical data charts
+  • Command interface
+  • Responsive design
+end note
+
+note right of RestAPI
+  **REST API Endpoints:**
+  
+  Sites & Coordinators:
+  • GET /api/sites
+  • GET /api/sites/{id}
+  • GET /api/sites/{id}/coordinators
+  
+  Nodes:
+  • GET /api/nodes
+  • GET /api/nodes/{id}
+  • PUT /api/nodes/{id}/led
+  
+  Telemetry:
+  • GET /api/telemetry?from=...&to=...
+  • GET /api/telemetry/latest
+  
+  Zones:
+  • GET /api/zones
+  • POST /api/zones
+  • PUT /api/zones/{id}
+end note
+
+note bottom of Mosquitto
+  **MQTT Topic Structure:**
+  
+  Telemetry (Subscribe):
+  • site/{siteId}/coord/{id}/telemetry
+  • site/{siteId}/node/{id}/telemetry
+  • site/{siteId}/coord/{id}/mmwave
+  
+  Commands (Publish):
+  • site/{siteId}/coord/{id}/cmd
+  • site/{siteId}/node/{id}/cmd
+  
+  Status:
+  • site/{siteId}/coord/{id}/status
+end note
+
+note bottom of MongoDB
+  **MongoDB Collections:**
+  
+  • sites - Site configurations
+  • coordinators - Coordinator metadata
+  • nodes - Node registry
+  • telemetry_history - Time-series data
+  • zones - Zone definitions
+  • commands_log - Audit trail
+  • events - System events
+  • mmwave_events - Presence data
+end note
+
+' Legend
+legend top left
+  |= Color |= Layer |
+  | <<frontend>> | Angular Web Dashboard |
+  | <<backend>> | Go Backend Services |
+  | <<infrastructure>> | MQTT Broker & Database |
+  | <<external>> | Embedded Devices (separate diagram) |
+  
+  **Stack:**
+  • Frontend: Angular 15+, TypeScript, RxJS
+  • Backend: Go 1.21+, Uber fx, Gin
+  • Database: MongoDB 7.0
+  • Messaging: Eclipse Mosquitto 2.0
+  • Deployment: Docker Compose
+endlegend
+
+@enduml
