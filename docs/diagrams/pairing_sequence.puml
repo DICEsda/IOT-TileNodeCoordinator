@@ -1,9 +1,20 @@
 @startuml
 title Frontend-Initiated Pairing: Node ↔ Coordinator via MQTT + ESP-NOW
 
-skinparam ParticipantPadding 10
-skinparam BoxPadding 8
+skinparam ParticipantPadding 18
+skinparam BoxPadding 14
 skinparam sequenceMessageAlign center
+skinparam defaultFontName Arial
+skinparam defaultFontSize 18
+skinparam ArrowFontSize 16
+skinparam NoteFontSize 16
+skinparam TitleFontSize 22
+skinparam ParticipantFontSize 18
+skinparam SequenceMessageFontSize 16
+skinparam SequenceParticipantBorderColor #444444
+skinparam SequenceParticipantBackgroundColor #ffffff
+skinparam NoteBackgroundColor #f7f7f7
+skinparam NoteBorderColor #888888
 
 actor "Operator (Frontend UI)" as UI
 participant "Angular Frontend" as FE
