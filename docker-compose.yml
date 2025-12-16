@@ -31,8 +31,8 @@ services:
       - "1883:1883"
       - "9001:9001"
     volumes:
-      - ./IOT-Backend-main/IOT-Backend-main/internal/config/mosquitto.conf:/mosquitto/config/mosquitto.conf
-      - ./IOT-Backend-main/IOT-Backend-main/internal/config/pwfile:/mosquitto/config/pwfile
+      - ./IOT-Backend-main/internal/config/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - ./IOT-Backend-main/internal/config/pwfile:/mosquitto/config/pwfile
       - mosquitto_data:/mosquitto/data
       - mosquitto_log:/mosquitto/log
     networks:
@@ -47,7 +47,7 @@ services:
   # Go Backend API
   backend:
     build:
-      context: ./IOT-Backend-main/IOT-Backend-main
+      context: ./IOT-Backend-main
       dockerfile: Dockerfile
     container_name: iot-backend
     restart: unless-stopped
@@ -73,7 +73,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./IOT-Backend-main/IOT-Backend-main/internal/config/google-service-account.json:/app/config/google-service-account.json:ro
+      - ./IOT-Backend-main/internal/config/google-service-account.json:/app/config/google-service-account.json:ro
     depends_on:
       mongodb:
         condition: service_healthy
