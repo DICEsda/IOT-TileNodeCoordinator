@@ -1,0 +1,69 @@
+@startuml
+title Frontend-Initiated Pairing: Node ↔ Coordinator via MQTT + ESP-NOW
+
+skinparam ParticipantPadding 18
+skinparam BoxPadding 14
+skinparam sequenceMessageAlign center
+skinparam defaultFontName Arial
+skinparam defaultFontSize 18
+skinparam ArrowFontSize 16
+skinparam NoteFontSize 16
+skinparam TitleFontSize 22
+skinparam ParticipantFontSize 18
+skinparam SequenceMessageFontSize 16
+skinparam SequenceParticipantBorderColor #444444
+skinparam SequenceParticipantBackgroundColor #ffffff
+skinparam NoteBackgroundColor #f7f7f7
+skinparam NoteBorderColor #888888
+
+actor "Operator (Frontend UI)" as UI
+participant "Angular Frontend" as FE
+participant "Backend (Go)" as BE
+participant "MQTT Broker" as MQ
+participant "Coordinator (ESP32-S3)" as Coord
+participant "ESP-NOW" as ESPNOW
+participant "Node (ESP32-C3)" as Node
+
+== Initiate pairing from Frontend ==
+UI -> FE : Click "Pair" (duration=60s)
+FE -> BE : HTTP/WS: POST /pair { duration_ms }
+BE -> MQ : MQTT PUBLISH site/{siteId}/coord/{coordId}/cmd\n{ "cmd":"pair", "duration_ms":60000 }
+MQ --> Coord : MQTT DELIVER /cmd
+
+note right of Coord
+Coordinator::startPairingWindow(duration_ms)
+- NodeRegistry.startPairing
+- EspNow.enablePairingMode
+- Status LED: pulse blue
+- Serial: "PAIRING MODE..."
+end note
+
+Coord -> ESPNOW : Broadcast pairing beacon { "msg":"pairing_ping" }
+
+== Node discovery and enrollment ==
+Node -> ESPNOW : Unicast PairingRequest { nodeId, mac, caps, fw_ver }
+ESPNOW --> Coord : recv PairingRequest
+Coord -> NodeRegistry : processPairingRequest(mac, nodeId)
+Coord -> ESPNOW : addPeer(mac), optional LMK
+Coord -> ESPNOW : ESP-NOW Ack { status: ok }
+
+note over Coord
+Persist node: Preferences NS "nodes"
+Map lightId ↔ nodeId
+Publish mirror status to MQTT
+Flash 4-pixel group (visual feedback)
+end note
+
+== Publish results & close window ==
+Coord -> MQ : MQTT PUBLISH site/{siteId}/node/{nodeId}/status = online (retained)
+Coord -> MQ : MQTT PUBLISH site/{siteId}/node/{nodeId}/telemetry {...}
+Coord -> FE : (via BE+WS) node list updated
+
+... after duration_ms ...
+Coord -> ESPNOW : Pairing window timeout
+note right of Coord
+EspNow.disablePairingMode();
+NodeRegistry.stopPairing();
+end note
+
+@enduml
