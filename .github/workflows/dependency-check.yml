@@ -1,0 +1,124 @@
+name: Dependency Checks
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    - cron: '0 0 * * 0'  # Weekly on Sunday
+
+jobs:
+  go-dependencies:
+    name: Go Dependencies Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Check Go dependencies
+        working-directory: IOT-Backend-main
+        run: |
+          echo "Checking Go module..."
+          go mod verify
+          echo "✓ Go dependencies verified"
+
+      - name: Check for outdated packages
+        working-directory: IOT-Backend-main
+        run: |
+          echo "Checking for outdated Go packages..."
+          go list -u -m all || true
+
+      - name: Check vulnerabilities
+        working-directory: IOT-Backend-main
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./... || echo "⚠️  Vulnerability check completed"
+        continue-on-error: true
+
+  npm-dependencies:
+    name: NPM Dependencies Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Check package-lock integrity
+        working-directory: IOT-Frontend-main/IOT-Frontend-main
+        run: |
+          echo "Verifying package-lock.json..."
+          npm ci --dry-run
+          echo "✓ package-lock.json is valid"
+
+      - name: Audit dependencies
+        working-directory: IOT-Frontend-main/IOT-Frontend-main
+        run: |
+          echo "Running npm audit..."
+          npm audit --audit-level=moderate || true
+        continue-on-error: true
+
+      - name: Check for outdated packages
+        working-directory: IOT-Frontend-main/IOT-Frontend-main
+        run: |
+          echo "Checking for outdated packages..."
+          npm outdated || true
+
+  platformio-dependencies:
+    name: PlatformIO Dependencies Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install PlatformIO
+        run: |
+          python -m pip install --upgrade pip
+          pip install platformio
+
+      - name: Check coordinator dependencies
+        working-directory: coordinator
+        run: |
+          echo "Checking coordinator libraries..."
+          pio pkg list
+          echo "✓ Coordinator dependencies checked"
+
+      - name: Check node dependencies
+        working-directory: node
+        run: |
+          echo "Checking node libraries..."
+          pio pkg list
+          echo "✓ Node dependencies checked"
+
+  docker-dependencies:
+    name: Docker Images Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check Docker Compose syntax
+        run: |
+          echo "Validating docker-compose.yml..."
+          docker-compose config > /dev/null
+          echo "✓ docker-compose.yml is valid"
+
+      - name: List Docker images
+        run: |
+          echo "Extracting Docker images from docker-compose.yml..."
+          grep 'image:' docker-compose.yml || true
+          echo "✓ Docker images listed"

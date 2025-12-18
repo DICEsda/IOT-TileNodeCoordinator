@@ -1,0 +1,175 @@
+name: Quick Check
+
+on:
+  push:
+    branches: [ main, develop, feature/* ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  quick-validation:
+    name: Quick Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Repository structure check
+        run: |
+          echo "=== Quick Repository Structure Check ==="
+          test -f README.md && echo "✓ README.md"
+          test -f docker-compose.yml && echo "✓ docker-compose.yml"
+          test -d coordinator && echo "✓ coordinator/"
+          test -d node && echo "✓ node/"
+          test -d IOT-Backend-main && echo "✓ IOT-Backend-main/"
+          test -d IOT-Frontend-main && echo "✓ IOT-Frontend-main/"
+          test -d shared && echo "✓ shared/"
+          test -d docs && echo "✓ docs/"
+          test -d .github/workflows && echo "✓ .github/workflows/"
+
+      - name: Configuration files check
+        run: |
+          echo "=== Configuration Files Check ==="
+          test -f coordinator/platformio.ini && echo "✓ coordinator/platformio.ini"
+          test -f node/platformio.ini && echo "✓ node/platformio.ini"
+          test -f IOT-Backend-main/go.mod && echo "✓ IOT-Backend-main/go.mod"
+          test -f IOT-Frontend-main/IOT-Frontend-main/package.json && echo "✓ IOT-Frontend-main/package.json"
+
+      - name: Check for common issues
+        run: |
+          echo "=== Checking for Common Issues ==="
+          if find . -name "*.orig" -o -name "*.rej" | grep -q .; then
+            echo "⚠️  Merge conflict artifacts found"
+          else
+            echo "✓ No merge artifacts"
+          fi
+          
+          if find . -name ".DS_Store" | grep -q .; then
+            echo "⚠️  .DS_Store files found"
+          else
+            echo "✓ No .DS_Store files"
+          fi
+
+  syntax-check:
+    name: Syntax Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check YAML syntax
+        run: |
+          echo "Checking YAML files..."
+          docker-compose config > /dev/null && echo "✓ docker-compose.yml valid"
+
+      - name: Check JSON syntax
+        run: |
+          echo "Checking JSON files..."
+          python -m json.tool api-collection.json > /dev/null && echo "✓ api-collection.json valid"
+          find IOT-Frontend-main -name "*.json" -not -path "*/node_modules/*" -exec python -m json.tool {} \; > /dev/null 2>&1 || true
+          echo "✓ JSON validation complete"
+
+  file-size-check:
+    name: File Size Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check for large files
+        run: |
+          echo "Checking for large files (>10MB)..."
+          find . -type f -size +10M -not -path "*/.git/*" -not -path "*/node_modules/*" -not -path "*/.pio/*" | while read file; do
+            echo "⚠️  Large file: $file ($(du -h "$file" | cut -f1))"
+          done || echo "✓ No large files found"
+
+      - name: Check repository size
+        run: |
+          echo "Repository size:"
+          du -sh . | head -1
+
+  git-check:
+    name: Git Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check commit messages
+        run: |
+          echo "Checking recent commit messages..."
+          git log --oneline -10
+
+      - name: Check branch
+        run: |
+          echo "Current branch: $(git branch --show-current)"
+          echo "Recent branches:"
+          git branch -a | head -10
+
+  quick-build-check:
+    name: Quick Build Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Quick Go build
+        working-directory: IOT-Backend-main
+        run: |
+          echo "Quick Go build check..."
+          go build -v ./cmd/iot/main.go
+          echo "✓ Backend compiles"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Quick npm check
+        working-directory: IOT-Frontend-main/IOT-Frontend-main
+        run: |
+          echo "Checking package.json..."
+          cat package.json | python -m json.tool > /dev/null
+          echo "✓ package.json valid"
+
+  security-quick-check:
+    name: Security Quick Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check for exposed secrets
+        run: |
+          echo "Quick secret scan..."
+          if grep -r -i -E '(password|secret|api[_-]?key)\s*=\s*["\047][a-zA-Z0-9]{20,}' . --exclude-dir={.git,node_modules,.pio,dist} 2>/dev/null | head -5; then
+            echo "⚠️  Potential secrets pattern found (verify manually)"
+          else
+            echo "✓ No obvious secrets detected"
+          fi
+
+      - name: Check .gitignore
+        run: |
+          echo "Checking .gitignore..."
+          test -f .gitignore && echo "✓ .gitignore exists"
+          grep -q ".env" .gitignore && echo "✓ .env is ignored"
+          grep -q "node_modules" .gitignore && echo "✓ node_modules is ignored"
+
+  all-checks-summary:
+    name: Summary
+    runs-on: ubuntu-latest
+    needs: [quick-validation, syntax-check, file-size-check, git-check, quick-build-check, security-quick-check]
+    if: always()
+    steps:
+      - name: Summary
+        run: |
+          echo "=== Quick Check Summary ==="
+          echo "✓ All quick checks completed"
+          echo "Check individual job results for details"

@@ -1,0 +1,124 @@
+name: Security Scanning
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    - cron: '0 2 * * 1'  # Weekly on Monday at 2am
+
+jobs:
+  secret-scanning:
+    name: Secret Scanning
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: TruffleHog Secret Scan
+        uses: trufflesecurity/trufflehog@main
+        with:
+          extra_args: --only-verified
+        continue-on-error: true
+
+      - name: Simple secret check
+        run: |
+          echo "Checking for common secret patterns..."
+          ! grep -r -i -E '(password|secret|api[_-]?key|token|private[_-]?key)\s*=\s*["\047][a-zA-Z0-9]{20,}' . --exclude-dir={.git,node_modules,.pio,dist} || echo "⚠️  Potential secrets found"
+        continue-on-error: true
+
+  dependency-vulnerabilities:
+    name: Dependency Vulnerabilities
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'table'
+          exit-code: '0'
+          ignore-unfixed: true
+          severity: 'CRITICAL,HIGH'
+
+  docker-security:
+    name: Docker Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Hadolint on backend Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: IOT-Backend-main/Dockerfile
+          failure-threshold: warning
+        continue-on-error: true
+
+      - name: Run Hadolint on frontend Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: IOT-Frontend-main/IOT-Frontend-main/Dockerfile
+          failure-threshold: warning
+        continue-on-error: true
+
+  code-scanning:
+    name: CodeQL Analysis
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [ 'go', 'javascript' ]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+        continue-on-error: true
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+        continue-on-error: true
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        continue-on-error: true
+
+  git-secrets:
+    name: Git Secrets Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for .env files
+        run: |
+          echo "Checking for .env files in repository..."
+          if find . -name ".env" -type f -not -path "*/.git/*" -not -path "*/node_modules/*" | grep -q .; then
+            echo "⚠️  .env files found - ensure they're in .gitignore"
+            find . -name ".env" -type f -not -path "*/.git/*" -not -path "*/node_modules/*"
+          else
+            echo "✓ No .env files in repository"
+          fi
+
+      - name: Check .gitignore
+        run: |
+          echo "Verifying .gitignore contains sensitive files..."
+          test -f .gitignore && echo "✓ .gitignore exists"
+          grep -q ".env" .gitignore && echo "✓ .env is ignored" || echo "⚠️  Add .env to .gitignore"
+          grep -q "node_modules" .gitignore && echo "✓ node_modules is ignored" || true

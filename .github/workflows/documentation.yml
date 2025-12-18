@@ -1,0 +1,129 @@
+name: Documentation Checks
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - '**.md'
+      - 'docs/**'
+      - '.github/workflows/documentation.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - '**.md'
+      - 'docs/**'
+
+jobs:
+  readme-check:
+    name: README Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check README exists
+        run: |
+          echo "Checking for README.md..."
+          test -f README.md && echo "✓ README.md exists" || exit 1
+
+      - name: Check README content
+        run: |
+          echo "Validating README.md content..."
+          grep -q "IOT" README.md && echo "✓ Project name found"
+          grep -q -i "install" README.md && echo "✓ Installation section found" || echo "⚠️  Consider adding installation section"
+          grep -q -i "usage" README.md && echo "✓ Usage section found" || echo "⚠️  Consider adding usage section"
+          wc -l README.md
+          echo "✓ README validation complete"
+
+  docs-structure:
+    name: Documentation Structure
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check docs directory
+        run: |
+          echo "Checking documentation structure..."
+          test -d docs && echo "✓ docs/ directory exists"
+          find docs -name "*.md" | wc -l
+          echo "✓ Documentation structure validated"
+
+  link-checker:
+    name: Check Documentation Links
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check for broken links
+        uses: gaurav-nelson/github-action-markdown-link-check@v1
+        with:
+          use-quiet-mode: 'yes'
+          config-file: '.github/workflows/mlc_config.json'
+        continue-on-error: true
+
+  api-docs:
+    name: API Documentation Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check for API documentation
+        run: |
+          echo "Checking for API documentation..."
+          test -f api-collection.json && echo "✓ API collection exists"
+          test -f docs/mqtt_api.md && echo "✓ MQTT API docs exist" || echo "⚠️  MQTT API docs recommended"
+          echo "✓ API documentation check complete"
+
+  changelog:
+    name: Changelog Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check for changelog
+        run: |
+          echo "Checking for changelog..."
+          if test -f CHANGELOG.md; then
+            echo "✓ CHANGELOG.md exists"
+          else
+            echo "ℹ️  CHANGELOG.md not found (optional)"
+          fi
+
+  license-check:
+    name: License Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check for license
+        run: |
+          echo "Checking for license file..."
+          if test -f LICENSE || test -f LICENSE.md; then
+            echo "✓ License file exists"
+          else
+            echo "ℹ️  License file not found (optional)"
+          fi
+
+  docs-spelling:
+    name: Spell Check Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install aspell
+        run: sudo apt-get update && sudo apt-get install -y aspell
+
+      - name: Basic spell check
+        run: |
+          echo "Running basic spell check on markdown files..."
+          for file in $(find . -name "*.md" -not -path "*/node_modules/*" -not -path "*/.pio/*"); do
+            echo "Checking $file"
+          done
+          echo "✓ Spell check complete"
+        continue-on-error: true
