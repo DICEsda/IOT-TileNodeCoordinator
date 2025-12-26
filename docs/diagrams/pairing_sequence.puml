@@ -1,16 +1,16 @@
 @startuml
 title Frontend-Initiated Pairing: Node ↔ Coordinator via MQTT + ESP-NOW
 
-skinparam ParticipantPadding 18
-skinparam BoxPadding 14
+skinparam ParticipantPadding 36
+skinparam BoxPadding 28
 skinparam sequenceMessageAlign center
 skinparam defaultFontName Arial
-skinparam defaultFontSize 18
-skinparam ArrowFontSize 16
-skinparam NoteFontSize 16
-skinparam TitleFontSize 22
-skinparam ParticipantFontSize 18
-skinparam SequenceMessageFontSize 16
+skinparam defaultFontSize 72
+skinparam ArrowFontSize 64
+skinparam NoteFontSize 64
+skinparam TitleFontSize 88
+skinparam ParticipantFontSize 72
+skinparam SequenceMessageFontSize 64
 skinparam SequenceParticipantBorderColor #444444
 skinparam SequenceParticipantBackgroundColor #ffffff
 skinparam NoteBackgroundColor #f7f7f7
